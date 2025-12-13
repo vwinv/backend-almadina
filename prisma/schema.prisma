@@ -1,0 +1,336 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  CUSTOMER
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum PromotionType {
+  PERCENTAGE // Réduction en pourcentage
+  FIXED // Réduction en montant fixe
+}
+
+enum PaymentStatus {
+  PENDING // En attente
+  COMPLETED // Payé
+  FAILED // Échoué
+  REFUNDED // Remboursé
+}
+
+enum PaymentMethod {
+  CREDIT_CARD
+  DEBIT_CARD
+  PAYPAL
+  BANK_TRANSFER
+  CASH
+  OTHER
+  MTN_CI
+  MOOV_CI
+  ORANGE_MONEY_CI
+  WAVE_CI
+  WAVE_SN
+  ORANGE_MONEY_SN
+}
+
+enum DeliveryPersonStatus {
+  ACTIVE
+  INACTIVE
+  ON_DELIVERY
+}
+
+model User {
+  id                Int               @id @default(autoincrement())
+  email             String?           @unique
+  phone             String?
+  password          String
+  firstName         String
+  lastName          String
+  profilePicture    String? // URL de la photo de profil
+  role              UserRole          @default(CUSTOMER)
+  orders            Order[]
+  shippingAddresses ShippingAddress[]
+  notifications     Notification[]
+  favorites         Favorite[]
+  reviews           Review[]
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+}
+
+model Category {
+  id            Int           @id @default(autoincrement())
+  name          String        @unique
+  description   String?
+  subCategories SubCategory[]
+  products      Product[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+}
+
+model SubCategory {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  categoryId  Int
+  category    Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  products    Product[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([categoryId, name]) // Le nom doit être unique par catégorie
+}
+
+model Product {
+  id                   Int                @id @default(autoincrement())
+  name                 String
+  description          String?
+  price                Decimal            @default(0)
+  stock                Int                @default(0)
+  image                String? // Image principale (maintenu pour compatibilité)
+  isActive             Boolean            @default(true) // Indique si le produit est actif
+  isFeatured           Boolean            @default(false) // Indique si le produit est mis en avant
+  isNew                Boolean            @default(false) // Indique si le produit est nouveau
+  categoryId           Int? // Optionnel : le produit peut être directement dans une catégorie
+  category             Category?          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  subCategoryId        Int? // Optionnel : le produit peut être dans une sous-catégorie
+  subCategory          SubCategory?       @relation(fields: [subCategoryId], references: [id], onDelete: Cascade)
+  customizationOptions Json? // Options de personnalisation disponibles (couleurs, tailles, texte, etc.)
+  promotions           ProductPromotion[]
+  orderItems           OrderItem[]
+  images               ProductImage[] // Toutes les photos du produit
+  videos               ProductVideo[] // Toutes les vidéos du produit
+  favorites            Favorite[]
+  reviews              Review[]
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+}
+
+model ProductImage {
+  id        Int      @id @default(autoincrement())
+  productId Int
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String // URL de la photo
+  isMain    Boolean  @default(false) // Photo principale
+  createdAt DateTime @default(now())
+}
+
+model ProductVideo {
+  id        Int      @id @default(autoincrement())
+  productId Int
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String // URL de la vidéo
+  thumbnail String? // URL de la miniature (optionnel)
+  createdAt DateTime @default(now())
+}
+
+model Order {
+  id                Int              @id @default(autoincrement())
+  userId            Int
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  total             Decimal          @default(0)
+  status            OrderStatus      @default(PENDING)
+  shippingAddressId Int?
+  shippingAddress   ShippingAddress? @relation(fields: [shippingAddressId], references: [id], onDelete: SetNull)
+  deliveryPersonId  Int? // Livreur assigné
+  deliveryPerson    DeliveryPerson?  @relation(fields: [deliveryPersonId], references: [id], onDelete: SetNull)
+  invoice           Invoice?
+  items             OrderItem[]
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+}
+
+model OrderItem {
+  id            Int        @id @default(autoincrement())
+  orderId       Int
+  order         Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId     Int
+  product       Product    @relation(fields: [productId], references: [id])
+  quantity      Int        @default(1)
+  price         Decimal    @default(0) // Prix unitaire après promotion
+  originalPrice Decimal? // Prix unitaire original (avant promotion)
+  promotionId   Int? // Promotion appliquée
+  promotion     Promotion? @relation(fields: [promotionId], references: [id], onDelete: SetNull)
+  customization Json?
+}
+
+model ShippingAddress {
+  id             Int           @id @default(autoincrement())
+  userId         Int
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label          String? // Nom de l'adresse (ex: "Maison", "Bureau")
+  firstName      String
+  lastName       String
+  address        String
+  city           String
+  postalCode     String
+  country        String
+  phone          String?
+  isDefault      Boolean       @default(false)
+  deliveryZoneId Int? // Zone de livraison
+  deliveryZone   DeliveryZone? @relation(fields: [deliveryZoneId], references: [id], onDelete: SetNull)
+  orders         Order[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+model Promotion {
+  id          Int                @id @default(autoincrement())
+  name        String
+  description String?
+  code        String?            @unique // Code promo optionnel
+  type        PromotionType
+  value       Decimal // Pourcentage (0-100) ou montant fixe selon le type
+  banniere    String? // URL de l'image de bannière de la promotion
+  startDate   DateTime
+  endDate     DateTime
+  isActive    Boolean            @default(true)
+  minPurchase Decimal? // Montant minimum d'achat pour appliquer la promo
+  maxUses     Int? // Nombre maximum d'utilisations (null = illimité)
+  currentUses Int                @default(0) // Nombre d'utilisations actuelles
+  products    ProductPromotion[]
+  orderItems  OrderItem[]
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+}
+
+model ProductPromotion {
+  id          Int       @id @default(autoincrement())
+  productId   Int
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  promotionId Int
+  promotion   Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@unique([productId, promotionId])
+}
+
+model Invoice {
+  id            Int      @id @default(autoincrement())
+  invoiceNumber String   @unique // Numéro de facture unique
+  orderId       Int      @unique
+  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  subtotal      Decimal // Sous-total avant taxes
+  tax           Decimal  @default(0) // Taxes
+  shipping      Decimal  @default(0) // Frais de livraison
+  discount      Decimal  @default(0) // Réduction totale
+  total         Decimal // Total final
+  payment       Payment?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Payment {
+  id            Int           @id @default(autoincrement())
+  invoiceId     Int           @unique
+  invoice       Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount        Decimal // Montant payé
+  method        PaymentMethod // Méthode de paiement
+  status        PaymentStatus @default(PENDING)
+  transactionId String?       @unique // ID de transaction (ex: Stripe, PayPal)
+  receiptUrl    String? // URL du reçu
+  invoiceData   String? // Données de la facture sauvegardées (JSON ou PDF en base64)
+  paidAt        DateTime? // Date de paiement
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+}
+
+enum NotificationType {
+  INFO // Information générale
+  SUCCESS // Succès (ex: commande confirmée)
+  WARNING // Avertissement
+  ERROR // Erreur
+  PROMOTION // Promotion spéciale
+}
+
+model Notification {
+  id        Int              @id @default(autoincrement())
+  userId    Int? // null = notification globale (tous les clients), sinon ID du client spécifique
+  user      User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String // Titre de la notification
+  message   String // Contenu de la notification
+  type      NotificationType @default(INFO)
+  isRead    Boolean          @default(false) // Indique si le client a lu la notification
+  link      String? // URL optionnelle (ex: vers une commande, un produit, etc.)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+}
+
+model Favorite {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId Int
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId]) // Un utilisateur ne peut ajouter un produit qu'une seule fois en favoris
+  @@index([userId])
+  @@index([productId])
+}
+
+model Review {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId  Int
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  rating     Int // Note de 1 à 5
+  comment    String? // Commentaire optionnel
+  isApproved Boolean  @default(false) // Indique si le commentaire est approuvé par l'admin (modération)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, productId]) // Un utilisateur ne peut laisser qu'un seul avis par produit
+  @@index([productId])
+  @@index([userId])
+  @@index([isApproved])
+}
+
+model DeliveryZone {
+  id                Int               @id @default(autoincrement())
+  name              String            @unique // Nom de la zone (ex: "Abidjan Centre", "Yopougon")
+  description       String? // Description de la zone
+  price             Decimal           @default(0) // Prix de livraison pour cette zone
+  isActive          Boolean           @default(true) // Indique si la zone est active
+  shippingAddresses ShippingAddress[]
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+}
+
+model DeliveryPerson {
+  id           Int                  @id @default(autoincrement())
+  firstName    String
+  lastName     String
+  phone        String               @unique // Numéro de téléphone unique
+  email        String?              @unique // Email optionnel
+  status       DeliveryPersonStatus @default(ACTIVE) // Statut du livreur
+  vehicleType  String? // Type de véhicule (ex: "Moto", "Voiture", "Vélo")
+  licensePlate String? // Numéro d'immatriculation
+  notes        String? // Notes supplémentaires
+  orders       Order[]
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  @@index([status])
+  @@index([phone])
+}
