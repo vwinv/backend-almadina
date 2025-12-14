@@ -10,21 +10,28 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   
   // Configuration CORS pour permettre les requêtes depuis le frontend
-  const allowedOrigins = process.env.FRONTEND_URL? process.env.FRONTEND_URL.split(';').map(o => o.trim()): ['http://localhost:3000'];
+  const allowedOrigins = [
+    'https://almadinahboutique.com',
+    'https://www.almadinahboutique.com',
+    process.env.FRONTEND_URL,
+    'http://localhost:3000',
+  ].filter(Boolean); // Enlève les valeurs undefined/null
+
   app.enableCors({
-        origin: (origin, callback) => {
-            // Autorise Postman, SSR, appels sans Origin
-            if (!origin) {
-            return callback(null, true);
-            }
-
-            if (allowedOrigins.includes(origin)) {
-            return callback(null, true);
-            }
-
-            return callback(new Error(`CORS blocked for origin: ${origin}`));
-        },
-        credentials: true,
+    origin: (origin, callback) => {
+      // Autoriser les requêtes sans origine (mobile apps, Postman, etc.)
+      if (!origin) return callback(null, true);
+      
+      // Vérifier si l'origine est dans la liste autorisée
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
   // Augmenter la limite de taille du body JSON (50MB)
