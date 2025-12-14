@@ -10,7 +10,7 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   
   // Configuration CORS pour permettre les requêtes depuis le frontend
-  const allowedOrigins = process.env.FRONTEND_URL? process.env.FRONTEND_URL.split(',').map(o => o.trim()): ['http://localhost:3000'];
+  const allowedOrigins = process.env.FRONTEND_URL? process.env.FRONTEND_URL.split(';').map(o => o.trim()): ['http://localhost:3000'];
   app.enableCors({
         origin: (origin, callback) => {
             // Autorise Postman, SSR, appels sans Origin
