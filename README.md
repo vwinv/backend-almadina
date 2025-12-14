@@ -31,6 +31,45 @@
 $ npm install
 ```
 
+## Configuration des variables d'environnement
+
+Créez un fichier `.env` à la racine du projet avec les variables suivantes :
+
+```env
+# Base de données
+DATABASE_URL="your-database-url"
+
+# JWT
+JWT_SECRET="your-jwt-secret"
+
+# Port du serveur
+PORT=3001
+
+# URL du frontend (pour CORS)
+FRONTEND_URL="https://almadinahboutique.com"
+
+# Cloudinary Configuration (pour l'upload d'images)
+CLOUDINARY_CLOUD_NAME="your-cloudinary-cloud-name"
+CLOUDINARY_API_KEY="your-cloudinary-api-key"
+CLOUDINARY_API_SECRET="your-cloudinary-api-secret"
+```
+
+### Configuration Cloudinary
+
+Pour configurer Cloudinary :
+
+1. Créez un compte sur [Cloudinary](https://cloudinary.com)
+2. Dans votre dashboard Cloudinary, récupérez :
+   - `Cloud Name` : votre nom de cloud
+   - `API Key` : votre clé API
+   - `API Secret` : votre secret API
+3. Ajoutez ces valeurs dans votre fichier `.env`
+
+Les images seront organisées dans Cloudinary dans les dossiers suivants :
+- `almadina/products/` - Images de produits
+- `almadina/promotions/` - Bannières de promotions
+- `almadina/profiles/` - Photos de profil utilisateurs
+
 ## Compile and run the project
 
 ```bash
