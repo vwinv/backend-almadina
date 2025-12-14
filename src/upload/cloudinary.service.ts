@@ -30,24 +30,12 @@ export class CloudinaryService {
     }
 
     return new Promise((resolve, reject) => {
+      // Options minimales pour éviter les problèmes de signature
+      // On évite toutes les transformations lors de l'upload
       const options: any = {
         folder: `almadina/${folder}`,
         resource_type: 'auto',
       };
-
-      // Ajouter les transformations seulement pour les images
-      if (file.mimetype && file.mimetype.startsWith('image/')) {
-        if (folder === 'products' || folder === 'promotions') {
-          options.quality = 'auto:good';
-          options.fetch_format = 'auto';
-        } else {
-          // Photos de profil : redimensionner
-          options.width = 500;
-          options.height = 500;
-          options.crop = 'limit';
-          options.quality = 'auto:good';
-        }
-      }
 
       const uploadStream = cloudinary.uploader.upload_stream(
         options,
@@ -62,7 +50,31 @@ export class CloudinaryService {
             reject(new Error('Upload failed: No result returned from Cloudinary'));
             return;
           }
-          resolve(result.secure_url);
+          
+          // Générer l'URL avec transformations appliquées à la volée (pas de problème de signature)
+          if (file.mimetype && file.mimetype.startsWith('image/')) {
+            const transformOptions: any = {
+              secure: true,
+              fetch_format: 'auto',
+              quality: 'auto:good',
+              type: 'upload',
+              resource_type: 'image',
+            };
+            
+            // Pour les photos de profil, ajouter le redimensionnement
+            if (folder === 'profiles') {
+              transformOptions.width = 500;
+              transformOptions.height = 500;
+              transformOptions.crop = 'limit';
+            }
+            
+            // Générer l'URL avec transformations
+            const optimizedUrl = cloudinary.url(result.public_id, transformOptions);
+            resolve(optimizedUrl);
+          } else {
+            // Pour les fichiers non-images, retourner l'URL originale
+            resolve(result.secure_url);
+          }
         },
       );
 
