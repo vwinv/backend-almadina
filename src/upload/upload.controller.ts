@@ -33,10 +33,21 @@ export class UploadController {
       throw new BadRequestException('Aucun fichier fourni');
     }
 
+    // Valider les fichiers
+    for (const file of files) {
+      if (!file.buffer || file.buffer.length === 0) {
+        throw new BadRequestException(`Le fichier ${file.originalname} est vide`);
+      }
+      if (!file.mimetype || !file.mimetype.startsWith('image/')) {
+        throw new BadRequestException(`Le fichier ${file.originalname} n'est pas une image valide`);
+      }
+    }
+
     try {
       const urls = await this.cloudinaryService.uploadFiles(files, 'products');
       return { urls };
     } catch (error) {
+      console.error('Erreur upload produits:', error);
       throw new BadRequestException(
         `Erreur lors de l'upload des images: ${error.message}`,
       );
