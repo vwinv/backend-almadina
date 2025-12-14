@@ -57,6 +57,8 @@ export class CloudinaryService {
       // Pour les vidéos, spécifier explicitement le resource_type
       if (file.mimetype && file.mimetype.startsWith('video/')) {
         options.resource_type = 'video';
+        // Pour les grandes vidéos, Cloudinary traite automatiquement en arrière-plan
+        // Pas besoin d'options supplémentaires qui peuvent causer des problèmes de signature
       }
       
       // Pour les PDF et autres fichiers raw, utiliser resource_type 'raw'
@@ -65,6 +67,13 @@ export class CloudinaryService {
           file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
         options.resource_type = 'raw';
       }
+      
+      console.log('📋 Options d\'upload:', {
+        folder: options.folder,
+        resource_type: options.resource_type,
+        file_mimetype: file.mimetype,
+        file_size: file.size,
+      });
 
       const uploadStream = cloudinary.uploader.upload_stream(
         options,
@@ -72,6 +81,12 @@ export class CloudinaryService {
           if (error) {
             const errorMessage = error.message || 'Erreur inconnue lors de l\'upload';
             const errorHttpCode = error.http_code || 'N/A';
+            console.error('❌ Erreur Cloudinary détaillée:', {
+              http_code: error.http_code,
+              message: error.message,
+              name: error.name,
+              raw: error,
+            });
             reject(new Error(`Cloudinary error (${errorHttpCode}): ${errorMessage}`));
             return;
           }

@@ -25,43 +25,81 @@ export class UploadController {
   @UseInterceptors(
     AnyFilesInterceptor({
       storage: memoryStorage(),
-      limits: { fileSize: 10 * 1024 * 1024, files: 20 }, // 10MB par fichier, 20 fichiers max
+      limits: { fileSize: 100 * 1024 * 1024, files: 20 }, // 100MB par fichier (pour supporter les vidéos), 20 fichiers max
     }),
   )
-  async uploadProductImages(@UploadedFiles() files: Express.Multer.File[]) {
+  async uploadProductMedia(@UploadedFiles() files: Express.Multer.File[]) {
     if (!files || files.length === 0) {
       throw new BadRequestException('Aucun fichier fourni');
     }
 
-    // Valider les fichiers
+    // Séparer les images et les vidéos
+    const images: Express.Multer.File[] = [];
+    const videos: Express.Multer.File[] = [];
+
+    // Valider et classifier les fichiers
     for (const file of files) {
       if (!file.buffer || file.buffer.length === 0) {
         throw new BadRequestException(`Le fichier ${file.originalname} est vide`);
       }
-      if (!file.mimetype || !file.mimetype.startsWith('image/')) {
-        throw new BadRequestException(`Le fichier ${file.originalname} n'est pas une image valide`);
+      if (!file.mimetype) {
+        throw new BadRequestException(
+          `Le fichier ${file.originalname} n'a pas de type MIME défini`,
+        );
+      }
+      
+      if (file.mimetype.startsWith('image/')) {
+        images.push(file);
+      } else if (file.mimetype.startsWith('video/')) {
+        videos.push(file);
+      } else {
+        throw new BadRequestException(
+          `Le fichier ${file.originalname} (type: ${file.mimetype}) n'est pas supporté. Seules les images et vidéos sont acceptées`,
+        );
       }
     }
 
     try {
-      console.log('📤 Upload de produits - Nombre de fichiers:', files.length);
+      console.log('📤 Upload de média produits - Images:', images.length, 'Vidéos:', videos.length);
+      
       files.forEach((file, index) => {
         console.log(`  Fichier ${index + 1}:`, {
           name: file.originalname,
           mimetype: file.mimetype,
           size: file.size,
           bufferLength: file.buffer?.length || 0,
+          type: file.mimetype.startsWith('image/') ? 'image' : 'video',
         });
       });
       
-      const urls = await this.cloudinaryService.uploadFiles(files, 'products');
-      console.log('✅ URLs générées:', urls);
-      return { urls };
+      // Uploader les images et vidéos en parallèle
+      const imageUploads = images.length > 0 
+        ? this.cloudinaryService.uploadFiles(images, 'products')
+        : Promise.resolve([]);
+      const videoUploads = videos.length > 0
+        ? this.cloudinaryService.uploadFiles(videos, 'videos')
+        : Promise.resolve([]);
+
+      const [imageUrls, videoUrls] = await Promise.all([imageUploads, videoUploads]);
+      
+      console.log('✅ URLs générées - Images:', imageUrls, 'Vidéos:', videoUrls);
+      
+      return { 
+        urls: [...imageUrls, ...videoUrls],
+        images: imageUrls,
+        videos: videoUrls,
+      };
     } catch (error) {
       console.error('❌ Erreur upload produits:', error);
       console.error('Stack:', error.stack);
+      
+      // Si c'est déjà une BadRequestException, la relancer telle quelle
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      
       throw new BadRequestException(
-        `Erreur lors de l'upload des images: ${error.message}`,
+        `Erreur lors de l'upload des médias: ${error.message}`,
       );
     }
   }
@@ -138,9 +176,19 @@ export class UploadController {
       if (!file.buffer || file.buffer.length === 0) {
         throw new BadRequestException(`Le fichier ${file.originalname} est vide`);
       }
-      if (!file.mimetype || !file.mimetype.startsWith('video/')) {
+      if (!file.mimetype) {
         throw new BadRequestException(
-          `Le fichier ${file.originalname} n'est pas une vidéo valide`,
+          `Le fichier ${file.originalname} n'a pas de type MIME défini`,
+        );
+      }
+      if (file.mimetype.startsWith('image/')) {
+        throw new BadRequestException(
+          `Le fichier ${file.originalname} est une image. Utilisez l'endpoint /api/uploads/products pour uploader des images`,
+        );
+      }
+      if (!file.mimetype.startsWith('video/')) {
+        throw new BadRequestException(
+          `Le fichier ${file.originalname} (type: ${file.mimetype}) n'est pas une vidéo valide. Seules les vidéos sont acceptées sur cet endpoint`,
         );
       }
     }
@@ -156,12 +204,31 @@ export class UploadController {
         });
       });
 
-      const urls = await this.cloudinaryService.uploadFiles(files, 'videos');
-      console.log('✅ URLs générées:', urls);
+      // Upload les fichiers un par un pour mieux gérer les erreurs
+      const urls: string[] = [];
+      for (let i = 0; i < files.length; i++) {
+        try {
+          console.log(`📤 Upload vidéo ${i + 1}/${files.length}...`);
+          const url = await this.cloudinaryService.uploadFile(files[i], 'videos');
+          urls.push(url);
+          console.log(`✅ Vidéo ${i + 1} uploadée:`, url);
+        } catch (fileError) {
+          console.error(`❌ Erreur upload vidéo ${i + 1} (${files[i].originalname}):`, fileError);
+          throw new BadRequestException(
+            `Erreur lors de l'upload de la vidéo "${files[i].originalname}": ${fileError.message}`,
+          );
+        }
+      }
+      
+      console.log('✅ Toutes les vidéos uploadées:', urls);
       return { urls };
     } catch (error) {
       console.error('❌ Erreur upload vidéos:', error);
       console.error('Stack:', error.stack);
+      // Si c'est déjà une BadRequestException, la relancer telle quelle
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
       throw new BadRequestException(
         `Erreur lors de l'upload des vidéos: ${error.message}`,
       );

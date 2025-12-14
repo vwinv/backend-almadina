@@ -234,6 +234,7 @@ model Invoice {
   shipping      Decimal  @default(0) // Frais de livraison
   discount      Decimal  @default(0) // Réduction totale
   total         Decimal // Total final
+  pdfUrl        String? // URL de la facture sur Cloudinary
   payment       Payment?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

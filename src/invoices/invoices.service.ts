@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CloudinaryService } from '../upload/cloudinary.service';
 import PDFDocument from 'pdfkit';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -9,7 +10,10 @@ export class InvoicesService {
   private readonly logger = new Logger(InvoicesService.name);
   private readonly invoicesDir = path.join(process.cwd(), 'public', 'invoices');
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinaryService: CloudinaryService,
+  ) {
     // Créer le dossier invoices s'il n'existe pas
     if (!fs.existsSync(this.invoicesDir)) {
       fs.mkdirSync(this.invoicesDir, { recursive: true });
@@ -226,11 +230,62 @@ export class InvoicesService {
     // Finaliser le PDF
     doc.end();
 
-    // Attendre que le fichier soit écrit
-    return new Promise((resolve, reject) => {
-      stream.on('finish', () => {
+    // Attendre que le fichier soit écrit et uploader sur Cloudinary
+    return new Promise<string>((resolve, reject) => {
+      stream.on('finish', async () => {
         this.logger.log(`PDF généré: ${filePath}`);
-        resolve(filePath);
+        
+        try {
+          // Lire le fichier PDF
+          const pdfBuffer = fs.readFileSync(filePath);
+          
+          // Créer un objet File-like pour Cloudinary
+          const pdfFile: Express.Multer.File = {
+            fieldname: 'file',
+            originalname: fileName,
+            encoding: '7bit',
+            mimetype: 'application/pdf',
+            size: pdfBuffer.length,
+            buffer: pdfBuffer,
+            destination: '',
+            filename: fileName,
+            path: filePath,
+            stream: null as any,
+          } as Express.Multer.File;
+
+          // Uploader sur Cloudinary
+          this.logger.log(`Upload de la facture sur Cloudinary...`);
+          const cloudinaryUrl = await this.cloudinaryService.uploadFile(
+            pdfFile,
+            'documents',
+          );
+          
+          this.logger.log(`Facture uploadée sur Cloudinary: ${cloudinaryUrl}`);
+          
+          // Mettre à jour la facture dans la base de données avec l'URL Cloudinary
+          try {
+            await (this.prisma as any).invoice.update({
+              where: { orderId: order.id },
+              data: {
+                pdfUrl: cloudinaryUrl,
+              },
+            });
+            this.logger.log(`URL Cloudinary sauvegardée dans la base de données`);
+          } catch (dbError) {
+            // Si le champ pdfUrl n'existe pas encore dans le schéma, on log juste l'erreur
+            this.logger.warn(
+              `Impossible de sauvegarder l'URL Cloudinary dans la base de données: ${dbError.message}. ` +
+              `Vérifiez que le champ 'pdfUrl' existe dans le modèle Invoice et que la migration a été appliquée.`,
+            );
+          }
+          
+          // Retourner l'URL Cloudinary
+          resolve(cloudinaryUrl);
+        } catch (uploadError) {
+          this.logger.error(`Erreur lors de l'upload sur Cloudinary: ${uploadError}`);
+          // En cas d'erreur d'upload, retourner quand même le chemin local
+          resolve(filePath);
+        }
       });
       stream.on('error', (error) => {
         this.logger.error(`Erreur lors de la génération du PDF: ${error}`);
