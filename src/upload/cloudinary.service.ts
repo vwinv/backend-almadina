@@ -5,10 +5,27 @@ import { Stream } from 'stream';
 @Injectable()
 export class CloudinaryService {
   constructor() {
+    // Vérifier et logger la configuration (sans exposer le secret)
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    const apiKey = process.env.CLOUDINARY_API_KEY;
+    const apiSecret = process.env.CLOUDINARY_API_SECRET;
+    
+    if (!cloudName || !apiKey || !apiSecret) {
+      console.error('❌ Configuration Cloudinary manquante!');
+      console.error('CLOUDINARY_CLOUD_NAME:', cloudName ? '✅ Défini' : '❌ Manquant');
+      console.error('CLOUDINARY_API_KEY:', apiKey ? '✅ Défini' : '❌ Manquant');
+      console.error('CLOUDINARY_API_SECRET:', apiSecret ? '✅ Défini' : '❌ Manquant');
+    } else {
+      console.log('✅ Configuration Cloudinary chargée:', {
+        cloud_name: cloudName,
+        api_key: apiKey.substring(0, 4) + '...',
+      });
+    }
+    
     cloudinary.config({
-      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-      api_key: process.env.CLOUDINARY_API_KEY,
-      api_secret: process.env.CLOUDINARY_API_SECRET,
+      cloud_name: cloudName,
+      api_key: apiKey,
+      api_secret: apiSecret,
     });
   }
 
@@ -17,7 +34,7 @@ export class CloudinaryService {
    */
   async uploadFile(
     file: Express.Multer.File,
-    folder: 'products' | 'promotions' | 'profiles',
+    folder: 'products' | 'promotions' | 'profiles' | 'videos' | 'documents',
   ): Promise<string> {
     // Vérifier la configuration Cloudinary
     if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
@@ -34,8 +51,20 @@ export class CloudinaryService {
       // On évite toutes les transformations lors de l'upload
       const options: any = {
         folder: `almadina/${folder}`,
-        resource_type: 'auto',
+        resource_type: 'auto', // 'auto' détecte automatiquement image, video, ou raw
       };
+      
+      // Pour les vidéos, spécifier explicitement le resource_type
+      if (file.mimetype && file.mimetype.startsWith('video/')) {
+        options.resource_type = 'video';
+      }
+      
+      // Pour les PDF et autres fichiers raw, utiliser resource_type 'raw'
+      if (file.mimetype === 'application/pdf' || 
+          file.mimetype === 'application/msword' ||
+          file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        options.resource_type = 'raw';
+      }
 
       const uploadStream = cloudinary.uploader.upload_stream(
         options,
@@ -51,30 +80,24 @@ export class CloudinaryService {
             return;
           }
           
-          // Générer l'URL avec transformations appliquées à la volée (pas de problème de signature)
-          if (file.mimetype && file.mimetype.startsWith('image/')) {
-            const transformOptions: any = {
-              secure: true,
-              fetch_format: 'auto',
-              quality: 'auto:good',
-              type: 'upload',
-              resource_type: 'image',
-            };
-            
-            // Pour les photos de profil, ajouter le redimensionnement
-            if (folder === 'profiles') {
-              transformOptions.width = 500;
-              transformOptions.height = 500;
-              transformOptions.crop = 'limit';
-            }
-            
-            // Générer l'URL avec transformations
-            const optimizedUrl = cloudinary.url(result.public_id, transformOptions);
-            resolve(optimizedUrl);
-          } else {
-            // Pour les fichiers non-images, retourner l'URL originale
-            resolve(result.secure_url);
-          }
+          // TEMPORAIRE: Retourner simplement l'URL sécurisée sans transformations
+          // pour éviter les problèmes de signature
+          console.log('✅ Upload réussi:', {
+            public_id: result.public_id,
+            format: result.format,
+            resource_type: result.resource_type,
+            width: result.width || 'N/A',
+            height: result.height || 'N/A',
+            duration: result.duration || 'N/A', // Pour les vidéos
+            bytes: result.bytes || 'N/A', // Taille du fichier
+          });
+          
+          // Retourner l'URL sécurisée directement (transformations peuvent être ajoutées côté frontend)
+          resolve(result.secure_url);
+          
+          // NOTE: Les transformations peuvent être ajoutées dans l'URL côté frontend
+          // Pour images: https://res.cloudinary.com/[cloud_name]/image/upload/f_auto,q_auto:good/[public_id]
+          // Pour vidéos: https://res.cloudinary.com/[cloud_name]/video/upload/[public_id]
         },
       );
 
@@ -95,7 +118,7 @@ export class CloudinaryService {
    */
   async uploadFiles(
     files: Express.Multer.File[],
-    folder: 'products' | 'promotions' | 'profiles',
+    folder: 'products' | 'promotions' | 'profiles' | 'videos' | 'documents',
   ): Promise<string[]> {
     const uploadPromises = files.map((file) => this.uploadFile(file, folder));
     return Promise.all(uploadPromises);

@@ -44,10 +44,22 @@ export class UploadController {
     }
 
     try {
+      console.log('📤 Upload de produits - Nombre de fichiers:', files.length);
+      files.forEach((file, index) => {
+        console.log(`  Fichier ${index + 1}:`, {
+          name: file.originalname,
+          mimetype: file.mimetype,
+          size: file.size,
+          bufferLength: file.buffer?.length || 0,
+        });
+      });
+      
       const urls = await this.cloudinaryService.uploadFiles(files, 'products');
+      console.log('✅ URLs générées:', urls);
       return { urls };
     } catch (error) {
-      console.error('Erreur upload produits:', error);
+      console.error('❌ Erreur upload produits:', error);
+      console.error('Stack:', error.stack);
       throw new BadRequestException(
         `Erreur lors de l'upload des images: ${error.message}`,
       );
@@ -104,6 +116,110 @@ export class UploadController {
     } catch (error) {
       throw new BadRequestException(
         `Erreur lors de l'upload de la photo de profil: ${error.message}`,
+      );
+    }
+  }
+
+  @Post('videos')
+  @Roles(UserRole.ADMIN)
+  @UseInterceptors(
+    AnyFilesInterceptor({
+      storage: memoryStorage(),
+      limits: { fileSize: 100 * 1024 * 1024, files: 10 }, // 100MB par fichier, 10 fichiers max
+    }),
+  )
+  async uploadVideos(@UploadedFiles() files: Express.Multer.File[]) {
+    if (!files || files.length === 0) {
+      throw new BadRequestException('Aucun fichier fourni');
+    }
+
+    // Valider les fichiers
+    for (const file of files) {
+      if (!file.buffer || file.buffer.length === 0) {
+        throw new BadRequestException(`Le fichier ${file.originalname} est vide`);
+      }
+      if (!file.mimetype || !file.mimetype.startsWith('video/')) {
+        throw new BadRequestException(
+          `Le fichier ${file.originalname} n'est pas une vidéo valide`,
+        );
+      }
+    }
+
+    try {
+      console.log('📤 Upload de vidéos - Nombre de fichiers:', files.length);
+      files.forEach((file, index) => {
+        console.log(`  Fichier ${index + 1}:`, {
+          name: file.originalname,
+          mimetype: file.mimetype,
+          size: file.size,
+          bufferLength: file.buffer?.length || 0,
+        });
+      });
+
+      const urls = await this.cloudinaryService.uploadFiles(files, 'videos');
+      console.log('✅ URLs générées:', urls);
+      return { urls };
+    } catch (error) {
+      console.error('❌ Erreur upload vidéos:', error);
+      console.error('Stack:', error.stack);
+      throw new BadRequestException(
+        `Erreur lors de l'upload des vidéos: ${error.message}`,
+      );
+    }
+  }
+
+  @Post('documents')
+  @Roles(UserRole.ADMIN)
+  @UseInterceptors(
+    AnyFilesInterceptor({
+      storage: memoryStorage(),
+      limits: { fileSize: 50 * 1024 * 1024, files: 10 }, // 50MB par fichier, 10 fichiers max
+    }),
+  )
+  async uploadDocuments(@UploadedFiles() files: Express.Multer.File[]) {
+    if (!files || files.length === 0) {
+      throw new BadRequestException('Aucun fichier fourni');
+    }
+
+    // Valider les fichiers
+    const allowedMimeTypes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ];
+
+    for (const file of files) {
+      if (!file.buffer || file.buffer.length === 0) {
+        throw new BadRequestException(`Le fichier ${file.originalname} est vide`);
+      }
+      if (!file.mimetype || !allowedMimeTypes.includes(file.mimetype)) {
+        throw new BadRequestException(
+          `Le fichier ${file.originalname} n'est pas un document valide (PDF, Word, Excel uniquement)`,
+        );
+      }
+    }
+
+    try {
+      console.log('📤 Upload de documents - Nombre de fichiers:', files.length);
+      files.forEach((file, index) => {
+        console.log(`  Fichier ${index + 1}:`, {
+          name: file.originalname,
+          mimetype: file.mimetype,
+          size: file.size,
+          bufferLength: file.buffer?.length || 0,
+        });
+      });
+
+      const urls = await this.cloudinaryService.uploadFiles(files, 'documents');
+      console.log('✅ URLs générées:', urls);
+      return { urls };
+    } catch (error) {
+      console.error('❌ Erreur upload documents:', error);
+      console.error('Stack:', error.stack);
+      throw new BadRequestException(
+        `Erreur lors de l'upload des documents: ${error.message}`,
       );
     }
   }

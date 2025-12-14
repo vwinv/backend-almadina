@@ -34,14 +34,14 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
-  // Augmenter la limite de taille du body JSON (50MB)
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+  // Augmenter la limite de taille du body (100MB pour supporter les vidéos)
+  app.use(express.json({ limit: '100mb' }));
+  app.use(express.urlencoded({ limit: '100mb', extended: true }));
   
   // Augmenter la limite pour les multipart/form-data (uploads de fichiers)
   // Note: La limite réelle est gérée par multer dans les interceptors
-  app.use(express.raw({ limit: '50mb' }));
-  app.use(express.text({ limit: '50mb' }));
+  app.use(express.raw({ limit: '100mb' }));
+  app.use(express.text({ limit: '100mb' }));
 
   // Servir les fichiers statiques (uploads)
   app.useStaticAssets(join(process.cwd(), 'public'));
