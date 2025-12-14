@@ -10,9 +10,21 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   
   // Configuration CORS pour permettre les requêtes depuis le frontend
+  const allowedOrigins = process.env.FRONTEND_URL? process.env.FRONTEND_URL.split(',').map(o => o.trim()): ['http://localhost:3000'];
   app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-    credentials: true,
+        origin: (origin, callback) => {
+            // Autorise Postman, SSR, appels sans Origin
+            if (!origin) {
+            return callback(null, true);
+            }
+
+            if (allowedOrigins.includes(origin)) {
+            return callback(null, true);
+            }
+
+            return callback(new Error(`CORS blocked for origin: ${origin}`));
+        },
+        credentials: true,
   });
 
   // Augmenter la limite de taille du body JSON (50MB)
