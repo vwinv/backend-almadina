@@ -23,7 +23,7 @@ export class InvoicesController {
    */
   @Get(':orderId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   async getInvoice(@Param('orderId', ParseIntPipe) orderId: number) {
     const invoice = await this.invoicesService.getInvoiceByOrderId(orderId);
     if (!invoice) {
@@ -39,7 +39,7 @@ export class InvoicesController {
    */
   @Get(':orderId/pdf')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   async downloadInvoicePDF(
     @Param('orderId', ParseIntPipe) orderId: number,
     @Res() res: Response,

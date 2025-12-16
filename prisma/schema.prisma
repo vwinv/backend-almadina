@@ -16,6 +16,23 @@ datasource db {
 enum UserRole {
   CUSTOMER
   ADMIN
+  MANAGER
+  SUPER_ADMIN
+}
+
+enum CashRegisterStatus {
+  OPEN // Caisse ouverte
+  CLOSED // Caisse fermée
+}
+
+enum CashRegisterTransactionType {
+  OPENING // Ouverture de caisse
+  CASH_SALE // Vente en espèces
+  CASH_RETURN // Retour/remboursement en espèces
+  CASH_IN // Entrée de fonds
+  CASH_OUT // Sortie de fonds
+  CLOSING // Fermeture de caisse
+  RECONCILIATION // Réconciliation
 }
 
 enum OrderStatus {
@@ -68,11 +85,13 @@ model User {
   lastName          String
   profilePicture    String? // URL de la photo de profil
   role              UserRole          @default(CUSTOMER)
-  orders            Order[]
+  orders            Order[] // Commandes passées par ce client
+  managedOrders     Order[]           @relation("ManagerOrders") // Commandes créées par ce manager
   shippingAddresses ShippingAddress[]
   notifications     Notification[]
   favorites         Favorite[]
   reviews           Review[]
+  cashRegisters     CashRegister[] // Caisses gérées par ce manager
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 }
@@ -104,7 +123,9 @@ model Product {
   id                   Int                @id @default(autoincrement())
   name                 String
   description          String?
-  price                Decimal            @default(0)
+  price                Decimal            @default(0) // Prix de vente
+  purchasePrice        Decimal            @default(0) // Prix d'achat du produit (au fournisseur)
+  costPrice            Decimal            @default(0) // Prix de revient (coût total incluant frais)
   stock                Int                @default(0)
   image                String? // Image principale (maintenu pour compatibilité)
   isActive             Boolean            @default(true) // Indique si le produit est actif
@@ -144,19 +165,22 @@ model ProductVideo {
 }
 
 model Order {
-  id                Int              @id @default(autoincrement())
-  userId            Int
-  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  total             Decimal          @default(0)
-  status            OrderStatus      @default(PENDING)
-  shippingAddressId Int?
-  shippingAddress   ShippingAddress? @relation(fields: [shippingAddressId], references: [id], onDelete: SetNull)
-  deliveryPersonId  Int? // Livreur assigné
-  deliveryPerson    DeliveryPerson?  @relation(fields: [deliveryPersonId], references: [id], onDelete: SetNull)
-  invoice           Invoice?
-  items             OrderItem[]
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
+  id                 Int                       @id @default(autoincrement())
+  userId             Int
+  user               User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdByManagerId Int? // Manager qui a créé la commande (si créée par un manager)
+  createdByManager   User?                     @relation("ManagerOrders", fields: [createdByManagerId], references: [id], onDelete: SetNull)
+  total              Decimal                   @default(0)
+  status             OrderStatus               @default(PENDING)
+  shippingAddressId  Int?
+  shippingAddress    ShippingAddress?          @relation(fields: [shippingAddressId], references: [id], onDelete: SetNull)
+  deliveryPersonId   Int? // Livreur assigné
+  deliveryPerson     DeliveryPerson?           @relation(fields: [deliveryPersonId], references: [id], onDelete: SetNull)
+  invoice            Invoice?
+  items              OrderItem[]
+  cashTransactions   CashRegisterTransaction[] // Transactions de caisse associées
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
 }
 
 model OrderItem {
@@ -174,23 +198,23 @@ model OrderItem {
 }
 
 model ShippingAddress {
-  id             Int           @id @default(autoincrement())
+  id             Int          @id @default(autoincrement())
   userId         Int
-  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   label          String? // Nom de l'adresse (ex: "Maison", "Bureau")
-  firstName      String
-  lastName       String
+  firstName      String?
+  lastName       String?
   address        String
   city           String
-  postalCode     String
-  country        String
+  postalCode     String?
+  country        String?
   phone          String?
-  isDefault      Boolean       @default(false)
-  deliveryZoneId Int? // Zone de livraison
-  deliveryZone   DeliveryZone? @relation(fields: [deliveryZoneId], references: [id], onDelete: SetNull)
+  isDefault      Boolean      @default(false)
+  deliveryZoneId Int // Zone de livraison (obligatoire)
+  deliveryZone   DeliveryZone @relation(fields: [deliveryZoneId], references: [id], onDelete: Cascade)
   orders         Order[]
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 }
 
 model Promotion {
@@ -334,4 +358,45 @@ model DeliveryPerson {
 
   @@index([status])
   @@index([phone])
+}
+
+model CashRegister {
+  id              Int                       @id @default(autoincrement())
+  userId          Int // Manager responsable de la caisse
+  user            User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date            DateTime                  @db.Date // Date de la caisse
+  openTime        DateTime // Heure d'ouverture
+  closeTime       DateTime? // Heure de fermeture
+  status          CashRegisterStatus        @default(OPEN)
+  openingBalance  Decimal                   @default(0) // Solde d'ouverture
+  closingBalance  Decimal? // Solde de fermeture
+  expectedBalance Decimal? // Solde attendu (calculé)
+  actualBalance   Decimal? // Solde réel compté (pour réconciliation)
+  difference      Decimal? // Différence entre attendu et réel
+  notes           String? // Notes de réconciliation
+  transactions    CashRegisterTransaction[] // Historique des transactions
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+
+  @@unique([userId, date]) // Un manager ne peut avoir qu'une caisse par jour
+  @@index([userId])
+  @@index([date])
+  @@index([status])
+}
+
+model CashRegisterTransaction {
+  id             Int                         @id @default(autoincrement())
+  cashRegisterId Int // Caisse concernée
+  cashRegister   CashRegister                @relation(fields: [cashRegisterId], references: [id], onDelete: Cascade)
+  type           CashRegisterTransactionType // Type de transaction
+  amount         Decimal                     @default(0) // Montant (positif pour entrée, négatif pour sortie)
+  description    String? // Description de la transaction
+  orderId        Int? // Commande associée (si vente/retour)
+  order          Order?                      @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  createdAt      DateTime                    @default(now())
+
+  @@index([cashRegisterId])
+  @@index([type])
+  @@index([orderId])
+  @@index([createdAt])
 }

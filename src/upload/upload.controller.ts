@@ -21,7 +21,7 @@ export class UploadController {
   constructor(private readonly cloudinaryService: CloudinaryService) {}
 
   @Post('products')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @UseInterceptors(
     AnyFilesInterceptor({
       storage: memoryStorage(),
@@ -105,7 +105,7 @@ export class UploadController {
   }
 
   @Post('promotions')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @UseInterceptors(
     AnyFilesInterceptor({
       storage: memoryStorage(),
@@ -159,7 +159,7 @@ export class UploadController {
   }
 
   @Post('videos')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @UseInterceptors(
     AnyFilesInterceptor({
       storage: memoryStorage(),
@@ -236,7 +236,7 @@ export class UploadController {
   }
 
   @Post('documents')
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @UseInterceptors(
     AnyFilesInterceptor({
       storage: memoryStorage(),

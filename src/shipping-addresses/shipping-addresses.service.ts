@@ -40,19 +40,17 @@ export class ShippingAddressesService {
   }
 
   async create(userId: number, createShippingAddressDto: CreateShippingAddressDto) {
-    // Vérifier que la zone de livraison existe si fournie
-    if (createShippingAddressDto.deliveryZoneId) {
-      const deliveryZone = await this.prisma.deliveryZone.findUnique({
-        where: { id: createShippingAddressDto.deliveryZoneId },
-      });
+    // Vérifier que la zone de livraison existe et est active (obligatoire)
+    const deliveryZone = await this.prisma.deliveryZone.findUnique({
+      where: { id: createShippingAddressDto.deliveryZoneId },
+    });
 
-      if (!deliveryZone) {
-        throw new NotFoundException(`Zone de livraison avec l'ID ${createShippingAddressDto.deliveryZoneId} introuvable`);
-      }
+    if (!deliveryZone) {
+      throw new NotFoundException(`Zone de livraison avec l'ID ${createShippingAddressDto.deliveryZoneId} introuvable`);
+    }
 
-      if (!deliveryZone.isActive) {
-        throw new BadRequestException('Cette zone de livraison n\'est pas active');
-      }
+    if (!deliveryZone.isActive) {
+      throw new BadRequestException('Cette zone de livraison n\'est pas active');
     }
 
     // Si c'est la première adresse ou si isDefault est true, mettre les autres à false
@@ -63,11 +61,39 @@ export class ShippingAddressesService {
       });
     }
 
+    // Construire l'objet data en omettant les valeurs undefined
+    const data: any = {
+      userId,
+      address: createShippingAddressDto.address,
+      city: createShippingAddressDto.city,
+      deliveryZoneId: createShippingAddressDto.deliveryZoneId,
+    };
+
+    // Ajouter les champs optionnels seulement s'ils sont définis
+    if (createShippingAddressDto.label !== undefined) {
+      data.label = createShippingAddressDto.label;
+    }
+    if (createShippingAddressDto.firstName !== undefined) {
+      data.firstName = createShippingAddressDto.firstName;
+    }
+    if (createShippingAddressDto.lastName !== undefined) {
+      data.lastName = createShippingAddressDto.lastName;
+    }
+    if (createShippingAddressDto.postalCode !== undefined) {
+      data.postalCode = createShippingAddressDto.postalCode;
+    }
+    if (createShippingAddressDto.country !== undefined) {
+      data.country = createShippingAddressDto.country;
+    }
+    if (createShippingAddressDto.phone !== undefined) {
+      data.phone = createShippingAddressDto.phone;
+    }
+    if (createShippingAddressDto.isDefault !== undefined) {
+      data.isDefault = createShippingAddressDto.isDefault;
+    }
+
     return this.prisma.shippingAddress.create({
-      data: {
-        ...createShippingAddressDto,
-        userId,
-      },
+      data,
       include: {
         deliveryZone: true,
       },

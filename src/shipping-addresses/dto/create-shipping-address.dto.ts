@@ -6,11 +6,13 @@ export class CreateShippingAddressDto {
   @IsString()
   label?: string;
 
+  @IsOptional()
   @IsString()
-  firstName: string;
+  firstName?: string;
 
+  @IsOptional()
   @IsString()
-  lastName: string;
+  lastName?: string;
 
   @IsString()
   address: string;
@@ -18,11 +20,13 @@ export class CreateShippingAddressDto {
   @IsString()
   city: string;
 
+  @IsOptional()
   @IsString()
-  postalCode: string;
+  postalCode?: string;
 
+  @IsOptional()
   @IsString()
-  country: string;
+  country?: string;
 
   @IsOptional()
   @IsString()
@@ -32,9 +36,8 @@ export class CreateShippingAddressDto {
   @IsBoolean()
   isDefault?: boolean;
 
-  @IsOptional()
   @IsInt()
   @Type(() => Number)
-  deliveryZoneId?: number; // Zone de livraison
+  deliveryZoneId: number; // Zone de livraison (obligatoire)
 }
 

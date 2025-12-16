@@ -31,7 +31,7 @@ export class AuthController {
 
   @Get('admin/me')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   async getAdminProfile(@CurrentUser() user: any) {
     return {
       id: user.id,

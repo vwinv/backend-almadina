@@ -11,14 +11,14 @@ export class StatisticsController {
 
   @Get('dashboard')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   getDashboardStats() {
     return this.statisticsService.getDashboardStats();
   }
 
   @Get('yearly-sales')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   getYearlySales() {
     return this.statisticsService.getYearlySales();
   }

@@ -7,6 +7,8 @@ import {
   IsInt,
   Min,
   MaxLength,
+  IsObject,
+  ValidateIf,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
@@ -23,6 +25,18 @@ export class CreateProductDto {
   @Min(0)
   @Type(() => Number)
   price: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  purchasePrice?: number; // Prix d'achat du produit (au fournisseur)
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  costPrice?: number; // Prix de revient (coût total incluant frais)
 
   @IsInt()
   @Min(0)
@@ -62,6 +76,8 @@ export class CreateProductDto {
   videos?: string[];
 
   @IsOptional()
-  customizationOptions?: any;
+  @ValidateIf((o) => o.customizationOptions !== undefined && o.customizationOptions !== null)
+  @IsObject()
+  customizationOptions?: Record<string, any>;
 }
 

@@ -34,7 +34,7 @@ export class ShippingAddressesController {
   // Route admin pour récupérer les adresses d'un client - DOIT être avant @Get(':id')
   @Get('customer/:userId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   findCustomerAddresses(@Param('userId', ParseIntPipe) userId: number) {
     return this.shippingAddressesService.findAll(userId);
   }

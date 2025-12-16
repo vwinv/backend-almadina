@@ -7,6 +7,7 @@ import { AdminLoginDto } from './dto/admin-login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { JwtPayload } from './strategies/jwt.strategy';
+import { UserRole } from '@prisma/client';
 
 @Injectable()
 export class AuthService {
@@ -42,9 +43,9 @@ export class AuthService {
       throw new UnauthorizedException('Email/Téléphone ou mot de passe incorrect');
     }
 
-    // Vérifier que l'utilisateur est admin si requis
-    if (requireAdmin && user.role !== 'ADMIN') {
-      throw new UnauthorizedException('Accès refusé. Seuls les administrateurs peuvent accéder à cette section.');
+    // Vérifier que l'utilisateur est admin, super admin ou manager si requis
+    if (requireAdmin && user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN && user.role !== UserRole.MANAGER) {
+      throw new UnauthorizedException('Accès refusé. Seuls les administrateurs, super administrateurs et gestionnaires peuvent accéder à cette section.');
     }
 
     const { password: _, ...result } = user;

@@ -1,12 +1,18 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { CreateManualOrderDto } from './dto/create-manual-order.dto';
+import { CashRegistersService } from '../cash-registers/cash-registers.service';
+import { CashRegisterTransactionType } from '../cash-registers/types/cash-register.types';
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => CashRegistersService))
+    private readonly cashRegistersService?: CashRegistersService,
+  ) {}
 
   async create(createOrderDto: CreateOrderDto) {
     // Vérifier que l'utilisateur existe
@@ -522,7 +528,7 @@ export class OrdersService {
     });
   }
 
-  async createManualOrder(createManualOrderDto: CreateManualOrderDto) {
+  async createManualOrder(createManualOrderDto: CreateManualOrderDto, managerId?: number) {
     // Vérifier que l'utilisateur existe
     const user = await this.prisma.user.findUnique({
       where: { id: createManualOrderDto.userId },
@@ -594,6 +600,7 @@ export class OrdersService {
     const order = await this.prisma.order.create({
       data: {
         userId: createManualOrderDto.userId,
+        createdByManagerId: managerId || null,
         total,
         status: 'PROCESSING' as any,
         shippingAddressId: shippingAddressId || null,
@@ -634,6 +641,30 @@ export class OrdersService {
       },
     });
 
+    // Si le paiement est en espèces et qu'un manager a créé la commande, créer une transaction de caisse
+    if (createManualOrderDto.paymentMethod === 'CASH' && managerId && this.cashRegistersService) {
+      try {
+        const cashRegister = await this.cashRegistersService.getTodayCashRegister(managerId);
+        // Vérifier que la caisse est ouverte (peut être 'OPEN' ou l'enum)
+        const isOpen = (cashRegister as any).status === 'OPEN' || (cashRegister as any).status === 'OPEN';
+        if (cashRegister && isOpen) {
+          await this.cashRegistersService.addTransaction(
+            managerId,
+            (cashRegister as any).id,
+            {
+              type: CashRegisterTransactionType.CASH_SALE,
+              amount: invoiceTotal,
+              description: `Vente en espèces - Commande #${order.id}`,
+              orderId: order.id,
+            }
+          );
+        }
+      } catch (error) {
+        // Log l'erreur mais ne bloque pas la création de la commande
+        console.error('Erreur lors de la création de la transaction de caisse:', error);
+      }
+    }
+
     // Récupérer la commande complète
     return this.prisma.order.findUnique({
       where: { id: order.id },
@@ -664,5 +695,34 @@ export class OrdersService {
         },
       } as any,
     });
+  }
+
+  /**
+   * Supprime une commande (uniquement si elle est annulée) - Réservé aux SUPER_ADMIN
+   */
+  async remove(id: number) {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      include: {
+        items: true,
+        invoice: true,
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Commande introuvable');
+    }
+
+    // Vérifier que la commande est annulée
+    if (order.status !== 'CANCELLED') {
+      throw new BadRequestException('Seules les commandes annulées peuvent être supprimées');
+    }
+
+    // Supprimer la commande et ses relations (les items seront supprimés en cascade si configuré)
+    await this.prisma.order.delete({
+      where: { id },
+    });
+
+    return { message: 'Commande supprimée avec succès' };
   }
 }
