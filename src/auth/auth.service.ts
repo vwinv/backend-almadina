@@ -77,6 +77,42 @@ export class AuthService {
     // Pour l'admin, on utilise uniquement l'email
     const user = await this.validateUser(adminLoginDto.email, adminLoginDto.password, true);
 
+    // Vérifier que l'utilisateur est ADMIN ou SUPER_ADMIN (pas MANAGER)
+    if (user.role === UserRole.MANAGER) {
+      throw new UnauthorizedException('Accès refusé. Les gestionnaires ne peuvent pas accéder à l\'espace admin.');
+    }
+
+    if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+      throw new UnauthorizedException('Accès refusé. Seuls les administrateurs et super administrateurs peuvent accéder à cette section.');
+    }
+
+    const payload: JwtPayload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    };
+
+    return {
+      access_token: this.jwtService.sign(payload),
+      user: {
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+      },
+    };
+  }
+
+  async caisseLogin(adminLoginDto: AdminLoginDto) {
+    // Pour la caisse, on utilise uniquement l'email
+    const user = await this.validateUser(adminLoginDto.email, adminLoginDto.password, true);
+
+    // Vérifier que l'utilisateur est UNIQUEMENT un MANAGER (pas ADMIN ou SUPER_ADMIN)
+    if (user.role !== UserRole.MANAGER) {
+      throw new UnauthorizedException('Accès refusé. Seuls les gestionnaires peuvent accéder à la caisse.');
+    }
+
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,

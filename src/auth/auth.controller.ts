@@ -19,6 +19,11 @@ export class AuthController {
     return this.authService.adminLogin(adminLoginDto);
   }
 
+  @Post('caisse/login')
+  async caisseLogin(@Body() adminLoginDto: AdminLoginDto) {
+    return this.authService.caisseLogin(adminLoginDto);
+  }
+
   @Post('customer/login')
   async customerLogin(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto, false);
@@ -33,6 +38,19 @@ export class AuthController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   async getAdminProfile(@CurrentUser() user: any) {
+    return {
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+    };
+  }
+
+  @Get('caisse/me')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.MANAGER)
+  async getCaisseProfile(@CurrentUser() user: any) {
     return {
       id: user.id,
       email: user.email,

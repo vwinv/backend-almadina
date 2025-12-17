@@ -5,6 +5,7 @@ import { UpdateOrderDto } from './dto/update-order.dto';
 import { CreateManualOrderDto } from './dto/create-manual-order.dto';
 import { CashRegistersService } from '../cash-registers/cash-registers.service';
 import { CashRegisterTransactionType } from '../cash-registers/types/cash-register.types';
+import { StockMovementType } from '@prisma/client';
 
 @Injectable()
 export class OrdersService {
@@ -30,7 +31,10 @@ export class OrdersService {
 
     // Créer l'adresse de livraison si fournie
     let shippingAddressId = createOrderDto.shippingAddressId;
+    let deliveryZoneId: number | null = null;
+    
     if (createOrderDto.shippingAddress && !shippingAddressId) {
+      deliveryZoneId = createOrderDto.shippingAddress.deliveryZoneId || null;
       const shippingAddress = await (this.prisma as any).shippingAddress.create({
         data: {
           userId: createOrderDto.userId,
@@ -41,6 +45,7 @@ export class OrdersService {
           postalCode: createOrderDto.shippingAddress.postalCode,
           country: createOrderDto.shippingAddress.country,
           phone: createOrderDto.shippingAddress.phone || null,
+          deliveryZoneId: deliveryZoneId,
           isDefault: false,
         },
       });
@@ -73,6 +78,43 @@ export class OrdersService {
         customization: item.customization || null,
       });
     }
+
+    // Récupérer le prix de livraison depuis la zone de livraison
+    let shippingCost = 0;
+    
+    // Essayer d'abord avec l'adresse existante
+    if (shippingAddressId) {
+      const shippingAddress = await (this.prisma as any).shippingAddress.findUnique({
+        where: { id: shippingAddressId },
+        include: {
+          deliveryZone: true,
+        },
+      });
+      if (shippingAddress?.deliveryZone?.price) {
+        shippingCost = Number(shippingAddress.deliveryZone.price);
+      } else if (shippingAddress?.deliveryZoneId) {
+        // Si la relation n'est pas chargée, récupérer directement la zone
+        const deliveryZone = await this.prisma.deliveryZone.findUnique({
+          where: { id: shippingAddress.deliveryZoneId },
+        });
+        if (deliveryZone?.price) {
+          shippingCost = Number(deliveryZone.price);
+        }
+      }
+    }
+    
+    // Si on n'a pas trouvé de prix et qu'on crée une nouvelle adresse avec deliveryZoneId
+    if (shippingCost === 0 && deliveryZoneId) {
+      const deliveryZone = await this.prisma.deliveryZone.findUnique({
+        where: { id: deliveryZoneId },
+      });
+      if (deliveryZone?.price) {
+        shippingCost = Number(deliveryZone.price);
+      }
+    }
+
+    // Ajouter le prix de livraison au total
+    total += shippingCost;
 
     // Créer la commande
     const order = await this.prisma.order.create({
@@ -118,22 +160,26 @@ export class OrdersService {
     });
 
     // Créer automatiquement la facture
-    const subtotal = Number(total);
-    const tax = subtotal * 0.18; // TVA 18%
-    const invoiceTotal = subtotal + tax;
+    // Le subtotal est le total sans la livraison
+    const subtotalWithoutShipping = Number(total) - shippingCost;
+    // Total facture = sous-total produits + livraison (sans TVA)
+    const invoiceTotal = subtotalWithoutShipping + shippingCost;
     const invoiceNumber = `INV-${Date.now()}-${order.id}`;
 
     const invoice = await (this.prisma as any).invoice.create({
       data: {
         invoiceNumber,
         orderId: order.id,
-        subtotal,
-        tax,
-        shipping: 0,
+        subtotal: subtotalWithoutShipping, // Sous-total des produits
+        tax: 0, // Pas de TVA
+        shipping: shippingCost, // Prix de livraison
         discount: 0,
-        total: invoiceTotal,
+        total: invoiceTotal, // Total = subtotal + shipping
       },
     });
+
+    // Mettre à jour le stock des produits commandés
+    await this.updateProductStockForOrder(order.id, orderItems);
 
     // Récupérer la commande avec la facture
     const orderWithInvoice = await this.prisma.order.findUnique({
@@ -581,6 +627,7 @@ export class OrdersService {
         quantity: item.quantity,
         price,
         originalPrice: Number(product.price),
+        customization: item.customization || null,
       });
     }
 
@@ -613,8 +660,8 @@ export class OrdersService {
 
     // Créer la facture
     const subtotal = total - deliveryFee;
-    const tax = subtotal * 0.18; // TVA 18%
-    const invoiceTotal = subtotal + tax + deliveryFee;
+    // Total facture = sous-total produits + livraison (sans TVA)
+    const invoiceTotal = subtotal + deliveryFee;
     const invoiceNumber = `INV-${Date.now()}-${order.id}`;
 
     const invoice = await (this.prisma as any).invoice.create({
@@ -622,10 +669,10 @@ export class OrdersService {
         invoiceNumber,
         orderId: order.id,
         subtotal,
-        tax,
+        tax: 0, // Pas de TVA
         shipping: deliveryFee,
         discount: 0,
-        total: invoiceTotal,
+        total: invoiceTotal, // Total = subtotal + shipping
       },
     });
 
@@ -665,6 +712,9 @@ export class OrdersService {
       }
     }
 
+    // Mettre à jour le stock des produits commandés
+    await this.updateProductStockForOrder(order.id, orderItems);
+
     // Récupérer la commande complète
     return this.prisma.order.findUnique({
       where: { id: order.id },
@@ -695,6 +745,53 @@ export class OrdersService {
         },
       } as any,
     });
+  }
+
+  /**
+   * Met à jour le stock des produits après création d'une commande
+   */
+  private async updateProductStockForOrder(orderId: number, orderItems: any[]) {
+    for (const item of orderItems) {
+      try {
+        // Récupérer le produit actuel pour connaître le stock
+        const product = await this.prisma.product.findUnique({
+          where: { id: item.productId },
+        });
+
+        if (!product) {
+          console.error(`Produit ${item.productId} introuvable pour mise à jour du stock`);
+          continue;
+        }
+
+        const oldStock = Number(product.stock) || 0;
+        const quantityToDeduct = item.quantity;
+        const newStock = Math.max(0, oldStock - quantityToDeduct); // Éviter les stocks négatifs
+
+        // Mettre à jour le stock du produit
+        await this.prisma.product.update({
+          where: { id: item.productId },
+          data: {
+            stock: newStock,
+          },
+        });
+
+        // Enregistrer le mouvement de stock
+        await this.prisma.stockMovement.create({
+          data: {
+            productId: item.productId,
+            type: StockMovementType.SALE,
+            quantity: quantityToDeduct,
+            oldStock: oldStock,
+            newStock: newStock,
+            orderId: orderId,
+            reason: `Vente - Commande #${orderId}`,
+          },
+        });
+      } catch (error) {
+        // Log l'erreur mais ne bloque pas la création de la commande
+        console.error(`Erreur lors de la mise à jour du stock pour le produit ${item.productId}:`, error);
+      }
+    }
   }
 
   /**

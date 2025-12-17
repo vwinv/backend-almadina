@@ -45,7 +45,12 @@ export class InvoicesService {
             },
           },
         },
-        shippingAddress: true,
+        shippingAddress: {
+          include: {
+            deliveryZone: true,
+          },
+        },
+        deliveryPerson: true,
         invoice: {
           include: {
             payment: true,
@@ -69,6 +74,7 @@ export class InvoicesService {
         total: order.total,
         status: order.status,
         createdAt: order.createdAt,
+        deliveryPerson: order.deliveryPerson || null,
       },
       customer: order.user,
       items: order.items,
@@ -94,6 +100,10 @@ export class InvoicesService {
     const customerTyped = customer as any;
     const shippingAddressTyped = shippingAddress as any;
     const itemsTyped = items as any[];
+    const deliveryPersonTyped = (order.deliveryPerson || null) as any;
+    
+    // Définir shipping tôt pour éviter les erreurs de scope
+    const shipping = Number(invoiceTyped.shipping || 0);
 
     // Nom du fichier PDF
     const fileName = `facture-${order.id}-${invoiceTyped.invoiceNumber}.pdf`;
@@ -138,6 +148,30 @@ export class InvoicesService {
       if (shippingAddressTyped.phone) {
         doc.text(`Téléphone: ${shippingAddressTyped.phone}`);
       }
+      if (shippingAddressTyped.deliveryZone) {
+        doc.text(`Zone de livraison: ${shippingAddressTyped.deliveryZone.name}`);
+        if (shippingAddressTyped.deliveryZone.price) {
+          doc.text(`Frais de livraison: ${Number(shippingAddressTyped.deliveryZone.price).toFixed(0)} CFA`);
+        }
+      }
+      doc.moveDown();
+    }
+
+    // Informations de livraison (Livreur)
+    if (deliveryPersonTyped) {
+      doc.fontSize(14).text('LIVRAISON', { underline: true });
+      doc.fontSize(12);
+      doc.text(`${deliveryPersonTyped.firstName} ${deliveryPersonTyped.lastName}`);
+      doc.text(`Téléphone: ${deliveryPersonTyped.phone}`);
+      if (deliveryPersonTyped.email) {
+        doc.text(`Email: ${deliveryPersonTyped.email}`);
+      }
+      if (deliveryPersonTyped.vehicleType) {
+        doc.text(`Véhicule: ${deliveryPersonTyped.vehicleType}`);
+        if (deliveryPersonTyped.licensePlate) {
+          doc.text(`Plaque d'immatriculation: ${deliveryPersonTyped.licensePlate}`);
+        }
+      }
       doc.moveDown();
     }
 
@@ -179,6 +213,21 @@ export class InvoicesService {
       yPosition += 20;
     });
 
+    // Ajouter la ligne Livraison dans le tableau (toujours affichée)
+    // Vérifier si on doit ajouter une nouvelle page
+    if (yPosition > 700) {
+      doc.addPage();
+      yPosition = 50;
+    }
+
+    doc.fontSize(10).font('Helvetica-Bold');
+    doc.text('Livraison', 50, yPosition, { width: 240 });
+    doc.text('-', 300, yPosition);
+    doc.text('-', 380, yPosition, { align: 'right', width: 90 });
+    doc.text(`${shipping.toFixed(0)} FCFA`, 480, yPosition, { align: 'right', width: 70 });
+    doc.fontSize(10).font('Helvetica'); // Remettre la police normale
+    yPosition += 20;
+
     doc.y = yPosition;
     doc.moveDown();
 
@@ -188,20 +237,19 @@ export class InvoicesService {
 
     // Totaux
     const subtotal = Number(invoiceTyped.subtotal);
-    const tax = Number(invoiceTyped.tax);
     const total = Number(invoiceTyped.total);
 
     doc.fontSize(12);
-    doc.text('Sous-total HT:', 350, doc.y, { align: 'right', width: 100 });
+    doc.text('Sous-total produits:', 350, doc.y, { align: 'right', width: 100 });
     doc.text(`${subtotal.toFixed(0)} FCFA`, 450, doc.y, { align: 'right', width: 100 });
     doc.moveDown();
 
-    doc.text('TVA (18%):', 350, doc.y, { align: 'right', width: 100 });
-    doc.text(`${tax.toFixed(0)} FCFA`, 450, doc.y, { align: 'right', width: 100 });
+    doc.text('Livraison:', 350, doc.y, { align: 'right', width: 100 });
+    doc.text(`${shipping.toFixed(0)} FCFA`, 450, doc.y, { align: 'right', width: 100 });
     doc.moveDown();
 
     doc.fontSize(14).font('Helvetica-Bold');
-    doc.text('TOTAL TTC:', 350, doc.y, { align: 'right', width: 100 });
+    doc.text('TOTAL:', 350, doc.y, { align: 'right', width: 100 });
     doc.text(`${total.toFixed(0)} FCFA`, 450, doc.y, { align: 'right', width: 100 });
     doc.moveDown(2);
 

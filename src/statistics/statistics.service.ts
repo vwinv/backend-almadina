@@ -1,14 +1,25 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { StatisticsCacheService } from './statistics-cache.service';
 
 @Injectable()
 export class StatisticsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cacheService: StatisticsCacheService,
+  ) {}
 
   /**
    * Récupère toutes les statistiques du tableau de bord
    */
   async getDashboardStats() {
+    // Vérifier le cache (5 minutes)
+    const cacheKey = 'dashboard-stats';
+    const cached = this.cacheService.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -82,16 +93,17 @@ export class StatisticsService {
       },
     });
 
-    // Revenus du mois
+    // Revenus du mois (toutes les commandes non annulées avec facture)
     const revenueThisMonth = await this.prisma.order.aggregate({
       where: {
         createdAt: {
           gte: startOfMonth,
         },
+        status: {
+          not: 'CANCELLED',
+        },
         invoice: {
-          payment: {
-            status: 'COMPLETED',
-          },
+          isNot: null, // La commande doit avoir une facture
         },
       },
       _sum: {
@@ -105,10 +117,11 @@ export class StatisticsService {
           gte: startOfLastMonth,
           lte: endOfLastMonth,
         },
+        status: {
+          not: 'CANCELLED',
+        },
         invoice: {
-          payment: {
-            status: 'COMPLETED',
-          },
+          isNot: null, // La commande doit avoir une facture
         },
       },
       _sum: {
@@ -120,7 +133,40 @@ export class StatisticsService {
       ? ((Number(revenueThisMonth._sum.total || 0) - Number(revenueLastMonth._sum.total)) / Number(revenueLastMonth._sum.total)) * 100
       : Number(revenueThisMonth._sum.total || 0) > 0 ? 100 : 0;
 
-    return {
+    // Total recettes (toutes les commandes non annulées, toutes périodes confondues)
+    // On inclut toutes les commandes qui ont une facture (même avec paiement PENDING ou sans paiement)
+    const totalRevenueResult = await this.prisma.order.aggregate({
+      where: {
+        status: {
+          not: 'CANCELLED',
+        },
+        invoice: {
+          isNot: null, // La commande doit avoir une facture
+        },
+      },
+      _sum: {
+        total: true,
+      },
+    });
+    const totalRevenue = Number(totalRevenueResult._sum.total || 0);
+
+    // Calcul du bénéfice total : recettes - coût d'achat des produits vendus
+    // Optimisation : utiliser une requête SQL brute pour calculer directement la somme
+    // On inclut tous les produits des commandes non annulées avec facture
+    const totalCostResult = await this.prisma.$queryRaw<Array<{ total_cost: bigint }>>`
+      SELECT COALESCE(SUM(oi.quantity * CAST(p."costPrice" AS DECIMAL)), 0) as total_cost
+      FROM "OrderItem" oi
+      INNER JOIN "Order" o ON oi."orderId" = o.id
+      INNER JOIN "Invoice" i ON o.id = i."orderId"
+      INNER JOIN "Product" p ON oi."productId" = p.id
+      WHERE o.status != 'CANCELLED'
+    `;
+    
+    const totalCost = Number(totalCostResult[0]?.total_cost || 0);
+
+    const totalProfit = totalRevenue - totalCost;
+
+    const result = {
       orders: {
         total: totalOrders,
         thisMonth: ordersThisMonth,
@@ -142,13 +188,26 @@ export class StatisticsService {
         lastMonth: Number(revenueLastMonth._sum.total || 0),
         growth: Math.round(revenueGrowth * 10) / 10,
       },
+      totalRevenue,
+      totalProfit,
     };
+
+    // Mettre en cache pour 5 minutes
+    this.cacheService.set(cacheKey, result, 5 * 60 * 1000);
+    return result;
   }
 
   /**
    * Récupère les ventes mensuelles sur une année
    */
   async getYearlySales() {
+    // Vérifier le cache (10 minutes)
+    const cacheKey = 'yearly-sales';
+    const cached = this.cacheService.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const now = new Date();
     const currentYear = now.getFullYear();
     const months = [
@@ -162,17 +221,18 @@ export class StatisticsService {
       const startOfMonth = new Date(currentYear, month, 1);
       const endOfMonth = new Date(currentYear, month + 1, 0, 23, 59, 59, 999);
 
-      // Calculer le total des ventes pour ce mois (commandes payées)
+      // Calculer le total des ventes pour ce mois (commandes non annulées avec facture)
       const monthlySales = await this.prisma.order.aggregate({
         where: {
           createdAt: {
             gte: startOfMonth,
             lte: endOfMonth,
           },
+          status: {
+            not: 'CANCELLED',
+          },
           invoice: {
-            payment: {
-              status: 'COMPLETED',
-            },
+            isNot: null, // La commande doit avoir une facture
           },
         },
         _sum: {
@@ -187,6 +247,8 @@ export class StatisticsService {
       });
     }
 
+    // Mettre en cache pour 10 minutes
+    this.cacheService.set(cacheKey, salesData, 10 * 60 * 1000);
     return salesData;
   }
 }

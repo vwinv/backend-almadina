@@ -7,6 +7,7 @@ import {
   IsBoolean,
   IsString,
   IsEnum,
+  IsObject,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -23,6 +24,10 @@ class OrderItemDto {
   @IsNumber()
   @Type(() => Number)
   price?: number;
+
+  @IsOptional()
+  @IsObject()
+  customization?: any;
 }
 
 class ShippingAddressDto {

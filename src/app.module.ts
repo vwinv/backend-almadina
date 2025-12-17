@@ -22,6 +22,7 @@ import { StatisticsModule } from './statistics/statistics.module';
 import { DeliveryZonesModule } from './delivery-zones/delivery-zones.module';
 import { DeliveryPersonsModule } from './delivery-persons/delivery-persons.module';
 import { CashRegistersModule } from './cash-registers/cash-registers.module';
+import { InventoryModule } from './inventory/inventory.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { CashRegistersModule } from './cash-registers/cash-registers.module';
     DeliveryZonesModule,
     DeliveryPersonsModule,
     CashRegistersModule,
+    InventoryModule,
   ],
   controllers: [AppController],
   providers: [AppService, PrismaService],

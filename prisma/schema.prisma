@@ -76,6 +76,14 @@ enum DeliveryPersonStatus {
   ON_DELIVERY
 }
 
+enum StockMovementType {
+  ADD // Ajout de stock
+  REMOVE // Retrait de stock
+  SET // Définition du stock à une valeur spécifique
+  SALE // Vente (réduction automatique lors d'une commande)
+  RETURN // Retour de produit (ajout automatique lors d'un retour)
+}
+
 model User {
   id                Int               @id @default(autoincrement())
   email             String?           @unique
@@ -92,6 +100,7 @@ model User {
   favorites         Favorite[]
   reviews           Review[]
   cashRegisters     CashRegister[] // Caisses gérées par ce manager
+  stockMovements    StockMovement[] @relation("StockMovements") // Mouvements de stock effectués par cet utilisateur
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 }
@@ -142,8 +151,15 @@ model Product {
   videos               ProductVideo[] // Toutes les vidéos du produit
   favorites            Favorite[]
   reviews              Review[]
+  stockMovements       StockMovement[] // Historique des mouvements de stock
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
+
+  @@index([isActive])
+  @@index([isFeatured])
+  @@index([categoryId])
+  @@index([subCategoryId])
+  @@index([stock])
 }
 
 model ProductImage {
@@ -179,8 +195,13 @@ model Order {
   invoice            Invoice?
   items              OrderItem[]
   cashTransactions   CashRegisterTransaction[] // Transactions de caisse associées
+  stockMovements     StockMovement[] @relation("StockMovements") // Mouvements de stock associés à cette commande
   createdAt          DateTime                  @default(now())
   updatedAt          DateTime                  @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([userId])
 }
 
 model OrderItem {
@@ -195,6 +216,9 @@ model OrderItem {
   promotionId   Int? // Promotion appliquée
   promotion     Promotion? @relation(fields: [promotionId], references: [id], onDelete: SetNull)
   customization Json?
+
+  @@index([orderId])
+  @@index([productId])
 }
 
 model ShippingAddress {
@@ -397,6 +421,28 @@ model CashRegisterTransaction {
 
   @@index([cashRegisterId])
   @@index([type])
+  @@index([orderId])
+  @@index([createdAt])
+}
+
+model StockMovement {
+  id          Int               @id @default(autoincrement())
+  productId   Int // Produit concerné
+  product     Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  type        StockMovementType // Type de mouvement
+  quantity    Int // Quantité concernée (toujours positive)
+  oldStock    Int // Stock avant le mouvement
+  newStock    Int // Stock après le mouvement
+  reason      String? // Raison du mouvement (optionnel)
+  userId      Int? // Utilisateur qui a effectué le mouvement (optionnel, pour les admins/managers)
+  user        User?             @relation("StockMovements", fields: [userId], references: [id], onDelete: SetNull)
+  orderId     Int? // Commande associée (si vente/retour automatique)
+  order       Order?            @relation("StockMovements", fields: [orderId], references: [id], onDelete: SetNull)
+  createdAt   DateTime          @default(now())
+
+  @@index([productId])
+  @@index([type])
+  @@index([userId])
   @@index([orderId])
   @@index([createdAt])
 }

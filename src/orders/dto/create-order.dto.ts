@@ -51,6 +51,11 @@ class ShippingAddressDto {
   @IsOptional()
   @IsString()
   phone?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  deliveryZoneId?: number;
 }
 
 export class CreateOrderDto {

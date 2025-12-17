@@ -4,6 +4,7 @@ import * as bcrypt from 'bcrypt';
 import { CreateUserDto } from './dto/create-user.dto';
 import { NotificationService } from './services/notification.service';
 import { generateRandomPassword } from '../utils/password-generator.util';
+import { normalizePhoneNumber } from '../utils/phone-normalizer.util';
 import { UserRole } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { CashRegisterStatus, CashRegisterTransactionType } from '../cash-registers/types/cash-register.types';
@@ -21,12 +22,46 @@ export class UsersService {
     };
 
     if (search) {
-      where.OR = [
-        { email: { contains: search, mode: 'insensitive' } },
-        { firstName: { contains: search, mode: 'insensitive' } },
-        { lastName: { contains: search, mode: 'insensitive' } },
-        { phone: { contains: search, mode: 'insensitive' } },
-      ];
+      const normalizedSearch = normalizePhoneNumber(search);
+      
+      // Si la recherche est un numéro de téléphone (contient des chiffres)
+      if (normalizedSearch && /^\d+$/.test(search.replace(/\s+/g, ''))) {
+        // Rechercher par numéro normalisé
+        const allCustomers = await this.prisma.user.findMany({
+          where: {
+            role: 'CUSTOMER',
+          },
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            phone: true,
+            createdAt: true,
+            _count: {
+              select: {
+                orders: true,
+              },
+            },
+          },
+        });
+
+        // Filtrer les clients dont le numéro normalisé contient le numéro recherché
+        return allCustomers.filter(customer => {
+          const customerNormalizedPhone = normalizePhoneNumber(customer.phone);
+          return customerNormalizedPhone.includes(normalizedSearch) ||
+                 customer.email?.toLowerCase().includes(search.toLowerCase()) ||
+                 customer.firstName?.toLowerCase().includes(search.toLowerCase()) ||
+                 customer.lastName?.toLowerCase().includes(search.toLowerCase());
+        });
+      } else {
+        // Recherche normale (nom, email)
+        where.OR = [
+          { email: { contains: search, mode: 'insensitive' } },
+          { firstName: { contains: search, mode: 'insensitive' } },
+          { lastName: { contains: search, mode: 'insensitive' } },
+        ];
+      }
     }
 
     return this.prisma.user.findMany({
@@ -49,10 +84,21 @@ export class UsersService {
   }
 
   async findCustomerByPhone(phone: string) {
-    return this.prisma.user.findFirst({
+    // Normaliser le numéro de téléphone recherché
+    const normalizedPhone = normalizePhoneNumber(phone);
+    
+    if (!normalizedPhone) {
+      return null;
+    }
+
+    // Récupérer tous les clients pour comparer les numéros normalisés
+    // (car les numéros en base peuvent ne pas être normalisés)
+    const customers = await this.prisma.user.findMany({
       where: {
         role: 'CUSTOMER',
-        phone: phone,
+        phone: {
+          not: null,
+        },
       },
       select: {
         id: true,
@@ -62,9 +108,26 @@ export class UsersService {
         phone: true,
       },
     });
+
+    // Trouver le client dont le numéro normalisé correspond
+    const customer = customers.find(c => {
+      const customerNormalizedPhone = normalizePhoneNumber(c.phone);
+      return customerNormalizedPhone === normalizedPhone;
+    });
+
+    return customer || null;
   }
 
   async createCustomer(data: { firstName: string; lastName: string; phone: string; email?: string }) {
+    // Normaliser le numéro de téléphone avant de vérifier s'il existe
+    const normalizedPhone = normalizePhoneNumber(data.phone);
+    
+    // Vérifier si un client avec ce numéro normalisé existe déjà
+    const existingCustomer = await this.findCustomerByPhone(data.phone);
+    if (existingCustomer) {
+      throw new ConflictException('Un client avec ce numéro de téléphone existe déjà');
+    }
+
     // Générer un email temporaire si non fourni
     const email = data.email || `customer_${Date.now()}@temp.com`;
     
@@ -77,7 +140,7 @@ export class UsersService {
         password: hashedPassword,
         firstName: data.firstName,
         lastName: data.lastName,
-        phone: data.phone,
+        phone: normalizedPhone, // Sauvegarder le numéro normalisé
         role: 'CUSTOMER',
       },
       select: {
@@ -180,7 +243,7 @@ export class UsersService {
         password: hashedPassword,
         firstName: createUserDto.firstName,
         lastName: createUserDto.lastName,
-        phone: createUserDto.phone,
+        phone: createUserDto.phone ? normalizePhoneNumber(createUserDto.phone) : null,
         role: createUserDto.role,
       },
       select: {
@@ -417,7 +480,7 @@ export class UsersService {
         ...(updateUserDto.firstName && { firstName: updateUserDto.firstName }),
         ...(updateUserDto.lastName && { lastName: updateUserDto.lastName }),
         ...(updateUserDto.email && { email: updateUserDto.email }),
-        ...(updateUserDto.phone !== undefined && { phone: updateUserDto.phone || null }),
+        ...(updateUserDto.phone !== undefined && { phone: updateUserDto.phone ? normalizePhoneNumber(updateUserDto.phone) : null }),
       },
       select: {
         id: true,

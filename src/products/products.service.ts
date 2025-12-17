@@ -1,11 +1,17 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { InventoryService } from '../inventory/inventory.service';
+import { StockMovementType } from '@prisma/client';
 
 @Injectable()
 export class ProductsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => InventoryService))
+    private readonly inventoryService: InventoryService,
+  ) {}
 
   async create(createProductDto: CreateProductDto) {
     const { images: imageUrls, videos: videoUrls, categoryId, subCategoryId, ...restData } = createProductDto;
@@ -124,23 +130,43 @@ export class ProductsService {
       orderBy: { createdAt: 'desc' },
     });
     
-    // Charger les images et vidéos pour chaque produit
-    const productsWithMedia = await Promise.all(
-      products.map(async (product) => {
-        const images = await (this.prisma as any).productImage.findMany({
-          where: { productId: product.id },
-          orderBy: { isMain: 'desc' },
-        });
-        
-        const videos = await (this.prisma as any).productVideo.findMany({
-          where: { productId: product.id },
-        });
-        
-        return { ...product, images, videos };
-      })
-    );
+    // Charger toutes les images et vidéos en une seule fois (évite le problème N+1)
+    const productIds = products.map(p => p.id);
     
-    return productsWithMedia;
+    const [allImages, allVideos] = await Promise.all([
+      productIds.length > 0 ? (this.prisma as any).productImage.findMany({
+        where: { productId: { in: productIds } },
+        orderBy: { isMain: 'desc' },
+      }) : [],
+      productIds.length > 0 ? (this.prisma as any).productVideo.findMany({
+        where: { productId: { in: productIds } },
+      }) : [],
+    ]);
+    
+    // Grouper les images et vidéos par productId
+    const imagesByProductId = new Map<number, any[]>();
+    const videosByProductId = new Map<number, any[]>();
+    
+    allImages.forEach((img: any) => {
+      if (!imagesByProductId.has(img.productId)) {
+        imagesByProductId.set(img.productId, []);
+      }
+      imagesByProductId.get(img.productId)!.push(img);
+    });
+    
+    allVideos.forEach((vid: any) => {
+      if (!videosByProductId.has(vid.productId)) {
+        videosByProductId.set(vid.productId, []);
+      }
+      videosByProductId.get(vid.productId)!.push(vid);
+    });
+    
+    // Associer les images et vidéos aux produits
+    return products.map(product => ({
+      ...product,
+      images: imagesByProductId.get(product.id) || [],
+      videos: videosByProductId.get(product.id) || [],
+    }));
   }
 
   async findFeatured() {
@@ -184,39 +210,67 @@ export class ProductsService {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Charger les images, vidéos et la note maximale pour chaque produit
-    const productsWithMedia = await Promise.all(
-      products.map(async (product) => {
-        const images = await (this.prisma as any).productImage.findMany({
-          where: { productId: product.id },
-          orderBy: { isMain: 'desc' },
-        });
-
-        const videos = await (this.prisma as any).productVideo.findMany({
-          where: { productId: product.id },
-        });
-
-        // Récupérer la note maximale des avis approuvés
-        const reviews = await (this.prisma as any).review.findMany({
-          where: {
-            productId: product.id,
-            isApproved: true,
-          },
-          select: {
-            rating: true,
-          },
-        });
-
-        let maxRating = 0;
-        if (reviews.length > 0) {
-          maxRating = Math.max(...reviews.map((r: any) => r.rating));
-        }
-
-        return { ...product, images, videos, maxRating };
-      }),
-    );
-
-    return productsWithMedia;
+    // Charger toutes les images, vidéos et avis en une seule fois (évite le problème N+1)
+    const productIds = products.map(p => p.id);
+    
+    const [allImages, allVideos, allReviews] = await Promise.all([
+      productIds.length > 0 ? (this.prisma as any).productImage.findMany({
+        where: { productId: { in: productIds } },
+        orderBy: { isMain: 'desc' },
+      }) : [],
+      productIds.length > 0 ? (this.prisma as any).productVideo.findMany({
+        where: { productId: { in: productIds } },
+      }) : [],
+      productIds.length > 0 ? (this.prisma as any).review.findMany({
+        where: {
+          productId: { in: productIds },
+          isApproved: true,
+        },
+        select: {
+          productId: true,
+          rating: true,
+        },
+      }) : [],
+    ]);
+    
+    // Grouper par productId
+    const imagesByProductId = new Map<number, any[]>();
+    const videosByProductId = new Map<number, any[]>();
+    const ratingsByProductId = new Map<number, number[]>();
+    
+    allImages.forEach((img: any) => {
+      if (!imagesByProductId.has(img.productId)) {
+        imagesByProductId.set(img.productId, []);
+      }
+      imagesByProductId.get(img.productId)!.push(img);
+    });
+    
+    allVideos.forEach((vid: any) => {
+      if (!videosByProductId.has(vid.productId)) {
+        videosByProductId.set(vid.productId, []);
+      }
+      videosByProductId.get(vid.productId)!.push(vid);
+    });
+    
+    allReviews.forEach((review: any) => {
+      if (!ratingsByProductId.has(review.productId)) {
+        ratingsByProductId.set(review.productId, []);
+      }
+      ratingsByProductId.get(review.productId)!.push(review.rating);
+    });
+    
+    // Associer les médias et calculer les notes maximales
+    return products.map(product => {
+      const ratings = ratingsByProductId.get(product.id) || [];
+      const maxRating = ratings.length > 0 ? Math.max(...ratings) : 0;
+      
+      return {
+        ...product,
+        images: imagesByProductId.get(product.id) || [],
+        videos: videosByProductId.get(product.id) || [],
+        maxRating,
+      };
+    });
   }
 
   async findPublic(categoryId?: number, subCategoryId?: number, search?: string) {
@@ -276,39 +330,67 @@ export class ProductsService {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Charger les images, vidéos et la note maximale pour chaque produit
-    const productsWithMedia = await Promise.all(
-      products.map(async (product) => {
-        const images = await (this.prisma as any).productImage.findMany({
-          where: { productId: product.id },
-          orderBy: { isMain: 'desc' },
-        });
-
-        const videos = await (this.prisma as any).productVideo.findMany({
-          where: { productId: product.id },
-        });
-
-        // Récupérer la note maximale des avis approuvés
-        const reviews = await (this.prisma as any).review.findMany({
-          where: {
-            productId: product.id,
-            isApproved: true,
-          },
-          select: {
-            rating: true,
-          },
-        });
-
-        let maxRating = 0;
-        if (reviews.length > 0) {
-          maxRating = Math.max(...reviews.map((r: any) => r.rating));
-        }
-
-        return { ...product, images, videos, maxRating };
-      }),
-    );
-
-    return productsWithMedia;
+    // Charger toutes les images, vidéos et avis en une seule fois (évite le problème N+1)
+    const productIds = products.map(p => p.id);
+    
+    const [allImages, allVideos, allReviews] = await Promise.all([
+      productIds.length > 0 ? (this.prisma as any).productImage.findMany({
+        where: { productId: { in: productIds } },
+        orderBy: { isMain: 'desc' },
+      }) : [],
+      productIds.length > 0 ? (this.prisma as any).productVideo.findMany({
+        where: { productId: { in: productIds } },
+      }) : [],
+      productIds.length > 0 ? (this.prisma as any).review.findMany({
+        where: {
+          productId: { in: productIds },
+          isApproved: true,
+        },
+        select: {
+          productId: true,
+          rating: true,
+        },
+      }) : [],
+    ]);
+    
+    // Grouper par productId
+    const imagesByProductId = new Map<number, any[]>();
+    const videosByProductId = new Map<number, any[]>();
+    const ratingsByProductId = new Map<number, number[]>();
+    
+    allImages.forEach((img: any) => {
+      if (!imagesByProductId.has(img.productId)) {
+        imagesByProductId.set(img.productId, []);
+      }
+      imagesByProductId.get(img.productId)!.push(img);
+    });
+    
+    allVideos.forEach((vid: any) => {
+      if (!videosByProductId.has(vid.productId)) {
+        videosByProductId.set(vid.productId, []);
+      }
+      videosByProductId.get(vid.productId)!.push(vid);
+    });
+    
+    allReviews.forEach((review: any) => {
+      if (!ratingsByProductId.has(review.productId)) {
+        ratingsByProductId.set(review.productId, []);
+      }
+      ratingsByProductId.get(review.productId)!.push(review.rating);
+    });
+    
+    // Associer les médias et calculer les notes maximales
+    return products.map(product => {
+      const ratings = ratingsByProductId.get(product.id) || [];
+      const maxRating = ratings.length > 0 ? Math.max(...ratings) : 0;
+      
+      return {
+        ...product,
+        images: imagesByProductId.get(product.id) || [],
+        videos: videosByProductId.get(product.id) || [],
+        maxRating,
+      };
+    });
   }
 
   async findOnePublic(id: number) {
@@ -434,7 +516,7 @@ export class ProductsService {
     return { ...product, images, videos };
   }
 
-  async update(id: number, updateProductDto: UpdateProductDto) {
+  async update(id: number, updateProductDto: UpdateProductDto, userId?: number) {
     // Vérifier si le produit existe
     const existing = await this.prisma.product.findUnique({
       where: { id },
@@ -444,7 +526,8 @@ export class ProductsService {
       throw new NotFoundException(`Produit avec l'ID ${id} introuvable`);
     }
 
-    const { images: imageUrls, videos: videoUrls, categoryId, subCategoryId, ...restData } = updateProductDto as any;
+    const oldStock = existing.stock;
+    const { images: imageUrls, videos: videoUrls, categoryId, subCategoryId, stock, ...restData } = updateProductDto as any;
 
     // Normaliser les valeurs : convertir 0, null, undefined en undefined
     const normalizedCategoryId = categoryId !== undefined ? (categoryId && categoryId > 0 ? categoryId : null) : undefined;
@@ -557,6 +640,37 @@ export class ProductsService {
         },
       } as any,
     });
+
+    // Enregistrer le mouvement de stock si le stock a changé
+    if (stock !== undefined && stock !== oldStock && this.inventoryService) {
+      const newStock = stock;
+      const difference = Math.abs(newStock - oldStock);
+      
+      let movementType: StockMovementType;
+      if (newStock > oldStock) {
+        movementType = StockMovementType.ADD;
+      } else if (newStock < oldStock) {
+        movementType = StockMovementType.REMOVE;
+      } else {
+        movementType = StockMovementType.SET;
+      }
+
+      try {
+        await this.inventoryService.recordStockMovement(
+          id,
+          movementType,
+          difference,
+          oldStock,
+          newStock,
+          userId,
+          undefined,
+          'Mise à jour manuelle du stock',
+        );
+      } catch (error) {
+        // Ne pas bloquer la mise à jour si l'enregistrement du mouvement échoue
+        console.error('Erreur lors de l\'enregistrement du mouvement de stock:', error);
+      }
+    }
 
     // Charger les images et vidéos séparément
     const productImages = await (this.prisma as any).productImage.findMany({

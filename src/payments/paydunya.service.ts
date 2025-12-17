@@ -59,17 +59,16 @@ export class PayDunyaService {
         // Générer un numéro de facture unique
         const invoiceNumber = `INV-${Date.now()}-${orderId}`;
         
-        // Calculer les totaux
+        // Calculer les totaux (sans TVA)
         const subtotal = Number(order.total);
-        const tax = subtotal * 0.18; // TVA 18%
-        const total = subtotal + tax;
+        const total = subtotal; // Pas de TVA
 
         invoice = await this.prisma.invoice.create({
           data: {
             invoiceNumber,
             orderId: order.id,
             subtotal,
-            tax,
+            tax: 0, // Pas de TVA
             shipping: 0,
             discount: 0,
             total,
@@ -89,19 +88,11 @@ export class PayDunyaService {
         };
       });
 
-      // Construire les taxes
-      const taxes: any = {
-        tax_0: {
-          name: 'TVA (18%)',
-          amount: Math.round(Number(invoice.tax)),
-        },
-      };
-
-      // Construire le payload pour PayDunya
+      // Construire le payload pour PayDunya (sans taxes)
       const payload = {
         invoice: {
           items,
-          taxes,
+          taxes: {}, // Pas de taxes
           total_amount: Math.round(Number(invoice.total)),
           description: `Commande #${order.id}`,
         },

@@ -5,9 +5,13 @@ import 'dotenv/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 import * as express from 'express';
+const compression = require('compression');
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  
+  // Compression gzip pour améliorer les performances
+  app.use(compression());
   
   // Configuration CORS pour permettre les requêtes depuis le frontend
   const allowedOrigins = [
