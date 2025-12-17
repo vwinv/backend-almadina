@@ -1,11 +1,5 @@
 -- CreateEnum
-CREATE TYPE "UserRole" AS ENUM ('CUSTOMER', 'ADMIN', 'MANAGER', 'SUPER_ADMIN');
-
--- CreateEnum
-CREATE TYPE "CashRegisterStatus" AS ENUM ('OPEN', 'CLOSED');
-
--- CreateEnum
-CREATE TYPE "CashRegisterTransactionType" AS ENUM ('OPENING', 'CASH_SALE', 'CASH_RETURN', 'CASH_IN', 'CASH_OUT', 'CLOSING', 'RECONCILIATION');
+CREATE TYPE "UserRole" AS ENUM ('CUSTOMER', 'ADMIN');
 
 -- CreateEnum
 CREATE TYPE "OrderStatus" AS ENUM ('PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED');
@@ -70,8 +64,6 @@ CREATE TABLE "Product" (
     "name" TEXT NOT NULL,
     "description" TEXT,
     "price" DECIMAL(65,30) NOT NULL DEFAULT 0,
-    "purchasePrice" DECIMAL(65,30) NOT NULL DEFAULT 0,
-    "costPrice" DECIMAL(65,30) NOT NULL DEFAULT 0,
     "stock" INTEGER NOT NULL DEFAULT 0,
     "image" TEXT,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
@@ -112,7 +104,6 @@ CREATE TABLE "ProductVideo" (
 CREATE TABLE "Order" (
     "id" SERIAL NOT NULL,
     "userId" INTEGER NOT NULL,
-    "createdByManagerId" INTEGER,
     "total" DECIMAL(65,30) NOT NULL DEFAULT 0,
     "status" "OrderStatus" NOT NULL DEFAULT 'PENDING',
     "shippingAddressId" INTEGER,
@@ -142,15 +133,15 @@ CREATE TABLE "ShippingAddress" (
     "id" SERIAL NOT NULL,
     "userId" INTEGER NOT NULL,
     "label" TEXT,
-    "firstName" TEXT,
-    "lastName" TEXT,
+    "firstName" TEXT NOT NULL,
+    "lastName" TEXT NOT NULL,
     "address" TEXT NOT NULL,
     "city" TEXT NOT NULL,
-    "postalCode" TEXT,
-    "country" TEXT,
+    "postalCode" TEXT NOT NULL,
+    "country" TEXT NOT NULL,
     "phone" TEXT,
     "isDefault" BOOLEAN NOT NULL DEFAULT false,
-    "deliveryZoneId" INTEGER NOT NULL,
+    "deliveryZoneId" INTEGER,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -198,7 +189,6 @@ CREATE TABLE "Invoice" (
     "shipping" DECIMAL(65,30) NOT NULL DEFAULT 0,
     "discount" DECIMAL(65,30) NOT NULL DEFAULT 0,
     "total" DECIMAL(65,30) NOT NULL,
-    "pdfUrl" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -291,39 +281,6 @@ CREATE TABLE "DeliveryPerson" (
     CONSTRAINT "DeliveryPerson_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE "CashRegister" (
-    "id" SERIAL NOT NULL,
-    "userId" INTEGER NOT NULL,
-    "date" DATE NOT NULL,
-    "openTime" TIMESTAMP(3) NOT NULL,
-    "closeTime" TIMESTAMP(3),
-    "status" "CashRegisterStatus" NOT NULL DEFAULT 'OPEN',
-    "openingBalance" DECIMAL(65,30) NOT NULL DEFAULT 0,
-    "closingBalance" DECIMAL(65,30),
-    "expectedBalance" DECIMAL(65,30),
-    "actualBalance" DECIMAL(65,30),
-    "difference" DECIMAL(65,30),
-    "notes" TEXT,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "CashRegister_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "CashRegisterTransaction" (
-    "id" SERIAL NOT NULL,
-    "cashRegisterId" INTEGER NOT NULL,
-    "type" "CashRegisterTransactionType" NOT NULL,
-    "amount" DECIMAL(65,30) NOT NULL DEFAULT 0,
-    "description" TEXT,
-    "orderId" INTEGER,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "CashRegisterTransaction_pkey" PRIMARY KEY ("id")
-);
-
 -- CreateIndex
 CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 
@@ -387,30 +344,6 @@ CREATE INDEX "DeliveryPerson_status_idx" ON "DeliveryPerson"("status");
 -- CreateIndex
 CREATE INDEX "DeliveryPerson_phone_idx" ON "DeliveryPerson"("phone");
 
--- CreateIndex
-CREATE INDEX "CashRegister_userId_idx" ON "CashRegister"("userId");
-
--- CreateIndex
-CREATE INDEX "CashRegister_date_idx" ON "CashRegister"("date");
-
--- CreateIndex
-CREATE INDEX "CashRegister_status_idx" ON "CashRegister"("status");
-
--- CreateIndex
-CREATE UNIQUE INDEX "CashRegister_userId_date_key" ON "CashRegister"("userId", "date");
-
--- CreateIndex
-CREATE INDEX "CashRegisterTransaction_cashRegisterId_idx" ON "CashRegisterTransaction"("cashRegisterId");
-
--- CreateIndex
-CREATE INDEX "CashRegisterTransaction_type_idx" ON "CashRegisterTransaction"("type");
-
--- CreateIndex
-CREATE INDEX "CashRegisterTransaction_orderId_idx" ON "CashRegisterTransaction"("orderId");
-
--- CreateIndex
-CREATE INDEX "CashRegisterTransaction_createdAt_idx" ON "CashRegisterTransaction"("createdAt");
-
 -- AddForeignKey
 ALTER TABLE "SubCategory" ADD CONSTRAINT "SubCategory_categoryId_fkey" FOREIGN KEY ("categoryId") REFERENCES "Category"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
@@ -428,9 +361,6 @@ ALTER TABLE "ProductVideo" ADD CONSTRAINT "ProductVideo_productId_fkey" FOREIGN 
 
 -- AddForeignKey
 ALTER TABLE "Order" ADD CONSTRAINT "Order_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "Order" ADD CONSTRAINT "Order_createdByManagerId_fkey" FOREIGN KEY ("createdByManagerId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Order" ADD CONSTRAINT "Order_shippingAddressId_fkey" FOREIGN KEY ("shippingAddressId") REFERENCES "ShippingAddress"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -451,7 +381,7 @@ ALTER TABLE "OrderItem" ADD CONSTRAINT "OrderItem_promotionId_fkey" FOREIGN KEY 
 ALTER TABLE "ShippingAddress" ADD CONSTRAINT "ShippingAddress_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ShippingAddress" ADD CONSTRAINT "ShippingAddress_deliveryZoneId_fkey" FOREIGN KEY ("deliveryZoneId") REFERENCES "DeliveryZone"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ShippingAddress" ADD CONSTRAINT "ShippingAddress_deliveryZoneId_fkey" FOREIGN KEY ("deliveryZoneId") REFERENCES "DeliveryZone"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ProductPromotion" ADD CONSTRAINT "ProductPromotion_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -479,12 +409,3 @@ ALTER TABLE "Review" ADD CONSTRAINT "Review_userId_fkey" FOREIGN KEY ("userId") 
 
 -- AddForeignKey
 ALTER TABLE "Review" ADD CONSTRAINT "Review_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CashRegister" ADD CONSTRAINT "CashRegister_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CashRegisterTransaction" ADD CONSTRAINT "CashRegisterTransaction_cashRegisterId_fkey" FOREIGN KEY ("cashRegisterId") REFERENCES "CashRegister"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "CashRegisterTransaction" ADD CONSTRAINT "CashRegisterTransaction_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE SET NULL ON UPDATE CASCADE;
