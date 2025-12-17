@@ -1,0 +1,2 @@
+-- Placeholder migration to mark as applied
+-- No SQL commands, just a dummy file so Prisma sees the migration
