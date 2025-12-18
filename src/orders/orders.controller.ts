@@ -20,8 +20,6 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserRole } from '@prisma/client';
-import { UserRoleExtended } from '../cash-registers/types/cash-register.types';
-
 @Controller('api/orders')
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
@@ -60,10 +58,10 @@ export class OrdersController {
   // Route pour créer une commande manuellement (admin ou manager) - DOIT être avant les routes avec :id
   @Post('manual')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRoleExtended.MANAGER as any as UserRole)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.MANAGER)
   createManual(@Body() createManualOrderDto: CreateManualOrderDto, @CurrentUser() user: any) {
     // Si c'est un manager, utiliser son ID
-    const managerId = user.role === 'MANAGER' ? user.id : undefined;
+    const managerId = user.role === UserRole.MANAGER ? user.id : undefined;
     return this.ordersService.createManualOrder(createManualOrderDto, managerId);
   }
 

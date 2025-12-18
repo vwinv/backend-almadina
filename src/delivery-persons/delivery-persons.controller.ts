@@ -9,6 +9,7 @@ import {
   UseGuards,
   ParseIntPipe,
   Put,
+  ForbiddenException,
 } from '@nestjs/common';
 import { DeliveryPersonsService } from './delivery-persons.service';
 import { CreateDeliveryPersonDto } from './dto/create-delivery-person.dto';
@@ -24,32 +25,30 @@ export class DeliveryPersonsController {
 
   @Get()
   findAll(@CurrentUser() user: any) {
-    if (user.role !== UserRole.ADMIN) {
-      throw new Error('Accès refusé. Cette route est réservée aux administrateurs.');
+    if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Accès refusé. Cette route est réservée aux administrateurs.');
     }
     return this.deliveryPersonsService.findAll();
   }
 
   @Get('active')
-  findActive(@CurrentUser() user: any) {
-    if (user.role !== UserRole.ADMIN) {
-      throw new Error('Accès refusé. Cette route est réservée aux administrateurs.');
-    }
+  findActive() {
+    // Route accessible à tous les utilisateurs authentifiés (ADMIN, SUPER_ADMIN, MANAGER)
     return this.deliveryPersonsService.findActive();
   }
 
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
-    if (user.role !== UserRole.ADMIN) {
-      throw new Error('Accès refusé. Cette route est réservée aux administrateurs.');
+    if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Accès refusé. Cette route est réservée aux administrateurs.');
     }
     return this.deliveryPersonsService.findOne(id);
   }
 
   @Post()
   create(@Body() createDeliveryPersonDto: CreateDeliveryPersonDto, @CurrentUser() user: any) {
-    if (user.role !== UserRole.ADMIN) {
-      throw new Error('Accès refusé. Cette route est réservée aux administrateurs.');
+    if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Accès refusé. Cette route est réservée aux administrateurs.');
     }
     return this.deliveryPersonsService.create(createDeliveryPersonDto);
   }
@@ -60,16 +59,16 @@ export class DeliveryPersonsController {
     @Body() updateDeliveryPersonDto: UpdateDeliveryPersonDto,
     @CurrentUser() user: any,
   ) {
-    if (user.role !== UserRole.ADMIN) {
-      throw new Error('Accès refusé. Cette route est réservée aux administrateurs.');
+    if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Accès refusé. Cette route est réservée aux administrateurs.');
     }
     return this.deliveryPersonsService.update(id, updateDeliveryPersonDto);
   }
 
   @Delete(':id')
   remove(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
-    if (user.role !== UserRole.ADMIN) {
-      throw new Error('Accès refusé. Cette route est réservée aux administrateurs.');
+    if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Accès refusé. Cette route est réservée aux administrateurs.');
     }
     return this.deliveryPersonsService.remove(id);
   }
@@ -80,8 +79,8 @@ export class DeliveryPersonsController {
     @Param('orderId', ParseIntPipe) orderId: number,
     @CurrentUser() user: any,
   ) {
-    if (user.role !== UserRole.ADMIN) {
-      throw new Error('Accès refusé. Cette route est réservée aux administrateurs.');
+    if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Accès refusé. Cette route est réservée aux administrateurs.');
     }
     return this.deliveryPersonsService.assignToOrder(deliveryPersonId, orderId);
   }

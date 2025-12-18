@@ -8,6 +8,7 @@ import {
   Delete,
   UseGuards,
   ParseIntPipe,
+  ForbiddenException,
 } from '@nestjs/common';
 import { DeliveryZonesService } from './delivery-zones.service';
 import { CreateDeliveryZoneDto } from './dto/create-delivery-zone.dto';
@@ -47,8 +48,8 @@ export class DeliveryZonesController {
   @Post()
   @UseGuards(JwtAuthGuard)
   create(@Body() createDeliveryZoneDto: CreateDeliveryZoneDto, @CurrentUser() user: any) {
-    if (user.role !== UserRole.ADMIN) {
-      throw new Error('Accès refusé. Cette route est réservée aux administrateurs.');
+    if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Accès refusé. Cette route est réservée aux administrateurs.');
     }
     return this.deliveryZonesService.create(createDeliveryZoneDto);
   }
@@ -60,8 +61,8 @@ export class DeliveryZonesController {
     @Body() updateDeliveryZoneDto: UpdateDeliveryZoneDto,
     @CurrentUser() user: any,
   ) {
-    if (user.role !== UserRole.ADMIN) {
-      throw new Error('Accès refusé. Cette route est réservée aux administrateurs.');
+    if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Accès refusé. Cette route est réservée aux administrateurs.');
     }
     return this.deliveryZonesService.update(id, updateDeliveryZoneDto);
   }
@@ -69,8 +70,8 @@ export class DeliveryZonesController {
   @Delete(':id')
   @UseGuards(JwtAuthGuard)
   remove(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
-    if (user.role !== UserRole.ADMIN) {
-      throw new Error('Accès refusé. Cette route est réservée aux administrateurs.');
+    if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('Accès refusé. Cette route est réservée aux administrateurs.');
     }
     return this.deliveryZonesService.remove(id);
   }
