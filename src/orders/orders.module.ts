@@ -4,9 +4,10 @@ import { OrdersService } from './orders.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthModule } from '../auth/auth.module';
 import { CashRegistersModule } from '../cash-registers/cash-registers.module';
+import { EmailModule } from '../email/email.module';
 
 @Module({
-  imports: [AuthModule, forwardRef(() => CashRegistersModule)],
+  imports: [AuthModule, forwardRef(() => CashRegistersModule), EmailModule],
   controllers: [OrdersController],
   providers: [OrdersService, PrismaService],
   exports: [OrdersService],

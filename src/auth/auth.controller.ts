@@ -4,6 +4,9 @@ import { LoginDto } from './dto/login.dto';
 import { AdminLoginDto } from './dto/admin-login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { GoogleCallbackDto } from './dto/google-callback.dto';
+import { FacebookCallbackDto } from './dto/facebook-callback.dto';
+import { MicrosoftCallbackDto } from './dto/microsoft-callback.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { Roles } from './decorators/roles.decorator';
@@ -98,6 +101,27 @@ export class AuthController {
       profilePicture: updatedUser.profilePicture,
       role: updatedUser.role,
     };
+  }
+
+  @Post('google/callback')
+  async googleCallback(@Body() googleCallbackDto: GoogleCallbackDto) {
+    console.log('Received Google callback request:', { credential: googleCallbackDto.credential?.substring(0, 50) + '...' });
+    return this.authService.googleAuth(googleCallbackDto);
+  }
+
+  @Post('facebook/callback')
+  async facebookCallback(@Body() facebookCallbackDto: FacebookCallbackDto) {
+    return this.authService.facebookAuth(facebookCallbackDto);
+  }
+
+  @Post('microsoft/admin/callback')
+  async microsoftAdminCallback(@Body() microsoftCallbackDto: MicrosoftCallbackDto) {
+    return this.authService.microsoftAuth(microsoftCallbackDto, UserRole.ADMIN);
+  }
+
+  @Post('microsoft/caisse/callback')
+  async microsoftCaisseCallback(@Body() microsoftCallbackDto: MicrosoftCallbackDto) {
+    return this.authService.microsoftAuth(microsoftCallbackDto, UserRole.MANAGER);
   }
 }
 

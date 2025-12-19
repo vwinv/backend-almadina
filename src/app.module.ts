@@ -23,6 +23,7 @@ import { DeliveryZonesModule } from './delivery-zones/delivery-zones.module';
 import { DeliveryPersonsModule } from './delivery-persons/delivery-persons.module';
 import { CashRegistersModule } from './cash-registers/cash-registers.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { EmailModule } from './email/email.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { InventoryModule } from './inventory/inventory.module';
     DeliveryPersonsModule,
     CashRegistersModule,
     InventoryModule,
+    EmailModule,
   ],
   controllers: [AppController],
   providers: [AppService, PrismaService],

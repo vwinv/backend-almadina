@@ -5,7 +5,9 @@ import { UpdateOrderDto } from './dto/update-order.dto';
 import { CreateManualOrderDto } from './dto/create-manual-order.dto';
 import { CashRegistersService } from '../cash-registers/cash-registers.service';
 import { CashRegisterTransactionType } from '../cash-registers/types/cash-register.types';
-import { StockMovementType } from '@prisma/client';
+import { StockMovementType, OrderStatus } from '@prisma/client';
+import { EmailService } from '../email/email.service';
+import { sendOrderStatusEmail } from './helpers/order-email.helper';
 
 @Injectable()
 export class OrdersService {
@@ -13,6 +15,7 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => CashRegistersService))
     private readonly cashRegistersService?: CashRegistersService,
+    private readonly emailService?: EmailService,
   ) {}
 
   async create(createOrderDto: CreateOrderDto) {
@@ -180,6 +183,44 @@ export class OrdersService {
 
     // Mettre à jour le stock des produits commandés
     await this.updateProductStockForOrder(order.id, orderItems);
+
+    // Récupérer la commande complète avec toutes les relations pour l'email
+    const orderForEmail = await this.prisma.order.findUnique({
+      where: { id: order.id },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        items: {
+          include: {
+            product: true,
+          },
+        },
+        shippingAddress: {
+          include: {
+            deliveryZone: true,
+          },
+        },
+        deliveryPerson: true,
+        invoice: {
+          include: {
+            payment: true,
+          },
+        },
+      } as any,
+    });
+
+    // Envoyer l'email de confirmation de commande (PENDING)
+    if (orderForEmail) {
+      sendOrderStatusEmail(this.emailService, orderForEmail, OrderStatus.PENDING).catch((err) => {
+        console.error('Erreur lors de l\'envoi de l\'email de confirmation:', err);
+      });
+    }
 
     // Récupérer la commande avec la facture
     const orderWithInvoice = await this.prisma.order.findUnique({
@@ -359,7 +400,8 @@ export class OrdersService {
       }
     }
 
-    return this.prisma.order.update({
+    const oldStatus = existing.status;
+    const updatedOrder = await this.prisma.order.update({
       where: { id },
       data: updateOrderDto as any,
       include: {
@@ -389,6 +431,15 @@ export class OrdersService {
         },
       } as any,
     });
+
+    // Envoyer un email si le statut a changé
+    if (updateOrderDto.status && updateOrderDto.status !== oldStatus) {
+      sendOrderStatusEmail(this.emailService, updatedOrder, updateOrderDto.status as OrderStatus).catch((err) => {
+        console.error('Erreur lors de l\'envoi de l\'email de notification:', err);
+      });
+    }
+
+    return updatedOrder;
   }
 
   async cancel(id: number) {
@@ -412,7 +463,7 @@ export class OrdersService {
       throw new BadRequestException('Impossible d\'annuler une commande déjà payée');
     }
 
-    return this.prisma.order.update({
+    const cancelledOrder = await this.prisma.order.update({
       where: { id },
       data: { status: 'CANCELLED' as any },
       include: {
@@ -442,6 +493,13 @@ export class OrdersService {
         },
       } as any,
     });
+
+    // Envoyer l'email de notification d'annulation
+    sendOrderStatusEmail(this.emailService, cancelledOrder, OrderStatus.CANCELLED).catch((err) => {
+      console.error('Erreur lors de l\'envoi de l\'email de notification:', err);
+    });
+
+    return cancelledOrder;
   }
 
   async validatePayment(id: number) {
@@ -491,7 +549,7 @@ export class OrdersService {
     }
 
     // Mettre à jour le statut de la commande
-    return this.prisma.order.update({
+    const updatedOrder = await this.prisma.order.update({
       where: { id },
       data: { status: 'PROCESSING' as any },
       include: {
@@ -521,6 +579,20 @@ export class OrdersService {
         },
       } as any,
     });
+
+    // Envoyer l'email de notification
+    sendOrderStatusEmail(this.emailService, updatedOrder, OrderStatus.PROCESSING).catch((err) => {
+      console.error('Erreur lors de l\'envoi de l\'email de notification:', err);
+    });
+
+    return updatedOrder;
+
+    // Envoyer l'email de notification
+    this.sendOrderStatusEmail(updatedOrder, 'PROCESSING' as OrderStatus).catch((err) => {
+      console.error('Erreur lors de l\'envoi de l\'email de notification:', err);
+    });
+
+    return updatedOrder;
   }
 
   async markAsDelivered(id: number, userId: number) {
@@ -542,7 +614,7 @@ export class OrdersService {
       throw new BadRequestException('La commande doit être expédiée avant d\'être marquée comme livrée');
     }
 
-    return this.prisma.order.update({
+    const updatedOrder = await this.prisma.order.update({
       where: { id },
       data: { status: 'DELIVERED' as any },
       include: {
@@ -572,6 +644,13 @@ export class OrdersService {
         },
       } as any,
     });
+
+    // Envoyer l'email de notification
+    sendOrderStatusEmail(this.emailService, updatedOrder, OrderStatus.DELIVERED).catch((err) => {
+      console.error('Erreur lors de l\'envoi de l\'email de notification:', err);
+    });
+
+    return updatedOrder;
   }
 
   async createManualOrder(createManualOrderDto: CreateManualOrderDto, managerId?: number) {
