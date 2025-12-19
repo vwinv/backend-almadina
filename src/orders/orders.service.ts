@@ -586,13 +586,6 @@ export class OrdersService {
     });
 
     return updatedOrder;
-
-    // Envoyer l'email de notification
-    this.sendOrderStatusEmail(updatedOrder, 'PROCESSING' as OrderStatus).catch((err) => {
-      console.error('Erreur lors de l\'envoi de l\'email de notification:', err);
-    });
-
-    return updatedOrder;
   }
 
   async markAsDelivered(id: number, userId: number) {
