@@ -7,6 +7,8 @@ import {
   IsBoolean,
   IsString,
   IsEnum,
+  IsIn,
+  IsNotEmpty,
   IsObject,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -69,7 +71,10 @@ export class CreateManualOrderDto {
   @Type(() => OrderItemDto)
   items: OrderItemDto[];
 
-  @IsEnum(['CASH', 'CARD', 'MOBILE_MONEY', 'OTHER'])
+  @IsNotEmpty({ message: 'paymentMethod is required' })
+  @IsIn(['CASH', 'CARD', 'MOBILE_MONEY', 'OM', 'WAVE', 'MTN', 'MOOV', 'OTHER'], {
+    message: 'paymentMethod must be one of the following values: CASH, CARD, MOBILE_MONEY, OM, WAVE, MTN, MOOV, OTHER'
+  })
   paymentMethod: string;
 
   @IsBoolean()

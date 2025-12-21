@@ -263,84 +263,46 @@ export class AuthService {
         throw new UnauthorizedException('Token Google invalide: informations manquantes');
       }
 
-      // Vérifier si l'utilisateur existe déjà avec cet email
-      let user = await this.prisma.user.findUnique({
+      // Vérifier si l'utilisateur existe avec cet email
+      const user = await this.prisma.user.findUnique({
         where: { email: payload.email },
       });
 
+      // Si l'utilisateur n'existe pas, refuser l'accès
       if (!user) {
-        // Créer un nouvel utilisateur avec Google
-        // Générer un mot de passe aléatoire (l'utilisateur n'en aura pas besoin pour se connecter via Google)
-        const randomPassword = Math.random().toString(36).slice(-16);
-        const hashedPassword = await bcrypt.hash(randomPassword, 10);
+        throw new UnauthorizedException('Votre compte n\'existe pas. Veuillez contacter l\'administrateur.');
+      }
 
-        // Extraire le prénom et nom depuis le payload Google
-        const firstName = payload.given_name || payload.name?.split(' ')[0] || 'Utilisateur';
-        const lastName = payload.family_name || payload.name?.split(' ').slice(1).join(' ') || 'Google';
+      // Vérifier que le rôle de l'utilisateur correspond au rôle attendu
+      if (targetRole === UserRole.MANAGER && user.role !== UserRole.MANAGER) {
+        throw new UnauthorizedException('Ce compte n\'est pas gestionnaire. Veuillez contacter l\'administrateur.');
+      }
 
-        // Créer l'utilisateur dans la base de données
-        try {
-          user = await this.prisma.user.create({
-            data: {
-              email: payload.email,
-              password: hashedPassword, // Mot de passe aléatoire car l'utilisateur se connectera via Google
-              firstName: firstName,
-              lastName: lastName,
-              role: targetRole, // CUSTOMER pour client, MANAGER pour caisse
-              profilePicture: payload.picture || null,
-              phone: null, // Pas de téléphone car Google ne fournit pas cette information
-            },
-          });
-          console.log(`Utilisateur Google créé avec succès (${targetRole}): ${user.email}`);
-        } catch (createError: any) {
-          console.error('Erreur lors de la création de l\'utilisateur Google:', createError);
-          // Si l'email existe déjà (conflit), essayer de le récupérer
-          if (createError.code === 'P2002' && createError.meta?.target?.includes('email')) {
-            user = await this.prisma.user.findUnique({
-              where: { email: payload.email },
-            });
-            if (!user) {
-              throw new BadRequestException('Erreur lors de la création de l\'utilisateur');
-            }
-          } else {
-            throw new BadRequestException('Erreur lors de la création de l\'utilisateur: ' + createError.message);
-          }
-        }
-      } else {
-        // Vérifier que le rôle de l'utilisateur existant correspond au rôle attendu
-        if (user.role !== targetRole) {
-          throw new UnauthorizedException(
-            targetRole === UserRole.MANAGER
-              ? 'Cet utilisateur n\'a pas les droits de gestionnaire'
-              : 'Cet utilisateur n\'a pas les droits de client'
-          );
-        }
-
-        // Utilisateur existe déjà, mettre à jour la photo de profil si elle a changé
-        if (payload.picture && user.profilePicture !== payload.picture) {
-          user = await this.prisma.user.update({
-            where: { id: user.id },
-            data: { profilePicture: payload.picture },
-          });
-        }
+      // Mettre à jour la photo de profil si elle a changé
+      let updatedUser = user;
+      if (payload.picture && user.profilePicture !== payload.picture) {
+        updatedUser = await this.prisma.user.update({
+          where: { id: user.id },
+          data: { profilePicture: payload.picture },
+        });
       }
 
       // Générer le token JWT pour notre application
       const jwtPayload: JwtPayload = {
-        sub: user.id,
-        email: user.email,
-        role: user.role,
+        sub: updatedUser.id,
+        email: updatedUser.email,
+        role: updatedUser.role,
       };
 
       return {
         access_token: this.jwtService.sign(jwtPayload),
         user: {
-          id: user.id,
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          profilePicture: user.profilePicture,
-          role: user.role,
+          id: updatedUser.id,
+          email: updatedUser.email,
+          firstName: updatedUser.firstName,
+          lastName: updatedUser.lastName,
+          profilePicture: updatedUser.profilePicture,
+          role: updatedUser.role,
         },
       };
     } catch (error) {
@@ -467,81 +429,57 @@ export class AuthService {
         throw new UnauthorizedException('Email Microsoft manquant');
       }
 
-      const firstName = microsoftCallbackDto.firstName || microsoftCallbackDto.name?.split(' ')[0] || 'Utilisateur';
-      const lastName = microsoftCallbackDto.lastName || microsoftCallbackDto.name?.split(' ').slice(1).join(' ') || 'Microsoft';
-
-      // Vérifier si l'utilisateur existe déjà avec cet email
-      let user = await this.prisma.user.findUnique({
+      // Vérifier si l'utilisateur existe avec cet email
+      const user = await this.prisma.user.findUnique({
         where: { email },
       });
 
+      // Si l'utilisateur n'existe pas, refuser l'accès
       if (!user) {
-        // Créer un nouvel utilisateur avec Microsoft
-        // Générer un mot de passe aléatoire (l'utilisateur n'en aura pas besoin pour se connecter via Microsoft)
-        const randomPassword = Math.random().toString(36).slice(-16);
-        const hashedPassword = await bcrypt.hash(randomPassword, 10);
+        const errorMessage = targetRole === UserRole.ADMIN
+          ? 'Votre compte n\'existe pas. Veuillez contacter le super administrateur.'
+          : 'Votre compte n\'existe pas. Veuillez contacter l\'administrateur.';
+        throw new UnauthorizedException(errorMessage);
+      }
 
-        try {
-          user = await this.prisma.user.create({
-            data: {
-              email,
-              password: hashedPassword,
-              firstName,
-              lastName,
-              role: targetRole, // ADMIN pour admin, MANAGER pour caisse
-              profilePicture: microsoftCallbackDto.picture || null,
-              phone: null,
-            },
-          });
-          console.log(`Utilisateur Microsoft créé avec succès (${targetRole}): ${user.email}`);
-        } catch (createError: any) {
-          console.error('Erreur lors de la création de l\'utilisateur Microsoft:', createError);
-          if (createError.code === 'P2002' && createError.meta?.target?.includes('email')) {
-            user = await this.prisma.user.findUnique({
-              where: { email },
-            });
-            if (!user) {
-              throw new BadRequestException('Erreur lors de la création de l\'utilisateur');
-            }
-          } else {
-            throw new BadRequestException('Erreur lors de la création de l\'utilisateur: ' + createError.message);
-          }
+      // Vérifier que le rôle de l'utilisateur correspond au rôle attendu
+      if (targetRole === UserRole.ADMIN) {
+        // Pour admin, vérifier ADMIN ou SUPER_ADMIN
+        if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+          throw new UnauthorizedException('Ce compte n\'est pas administrateur. Veuillez contacter le super administrateur.');
         }
-      } else {
-        // Vérifier que le rôle de l'utilisateur existant correspond au rôle attendu
-        if (user.role !== targetRole) {
-          throw new UnauthorizedException(
-            targetRole === UserRole.ADMIN
-              ? 'Cet utilisateur n\'a pas les droits d\'administrateur'
-              : 'Cet utilisateur n\'a pas les droits de gestionnaire'
-          );
+      } else if (targetRole === UserRole.MANAGER) {
+        // Pour caisse, vérifier MANAGER uniquement
+        if (user.role !== UserRole.MANAGER) {
+          throw new UnauthorizedException('Ce compte n\'est pas gestionnaire. Veuillez contacter l\'administrateur.');
         }
+      }
 
-        // Mettre à jour la photo de profil si elle a changé
-        if (microsoftCallbackDto.picture && user.profilePicture !== microsoftCallbackDto.picture) {
-          user = await this.prisma.user.update({
-            where: { id: user.id },
-            data: { profilePicture: microsoftCallbackDto.picture },
-          });
-        }
+      // Mettre à jour la photo de profil si elle a changé
+      let updatedUser = user;
+      if (microsoftCallbackDto.picture && user.profilePicture !== microsoftCallbackDto.picture) {
+        updatedUser = await this.prisma.user.update({
+          where: { id: user.id },
+          data: { profilePicture: microsoftCallbackDto.picture },
+        });
       }
 
       // Générer le token JWT pour notre application
       const jwtPayload: JwtPayload = {
-        sub: user.id,
-        email: user.email,
-        role: user.role,
+        sub: updatedUser.id,
+        email: updatedUser.email,
+        role: updatedUser.role,
       };
 
       return {
         access_token: this.jwtService.sign(jwtPayload),
         user: {
-          id: user.id,
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          profilePicture: user.profilePicture,
-          role: user.role,
+          id: updatedUser.id,
+          email: updatedUser.email,
+          firstName: updatedUser.firstName,
+          lastName: updatedUser.lastName,
+          profilePicture: updatedUser.profilePicture,
+          role: updatedUser.role,
         },
       };
     } catch (error) {

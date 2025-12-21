@@ -207,7 +207,6 @@ export class ProductsService {
           },
         },
       } as any,
-      orderBy: { createdAt: 'desc' },
     });
 
     // Charger toutes les images, vidéos et avis en une seule fois (évite le problème N+1)

@@ -5,7 +5,7 @@ import { UpdateOrderDto } from './dto/update-order.dto';
 import { CreateManualOrderDto } from './dto/create-manual-order.dto';
 import { CashRegistersService } from '../cash-registers/cash-registers.service';
 import { CashRegisterTransactionType } from '../cash-registers/types/cash-register.types';
-import { StockMovementType, OrderStatus } from '@prisma/client';
+import { StockMovementType, OrderStatus, PaymentMethod } from '@prisma/client';
 import { EmailService } from '../email/email.service';
 import { sendOrderStatusEmail } from './helpers/order-email.helper';
 
@@ -750,19 +750,63 @@ export class OrdersService {
     });
 
     // Créer le paiement
-    const paymentStatus = createManualOrderDto.paymentMethod === 'CASH' ? 'COMPLETED' : 'PENDING';
+    // Mapper la méthode de paiement du DTO vers l'enum Prisma
+    const mapPaymentMethod = (method: string): PaymentMethod => {
+      switch (method) {
+        case 'CASH':
+          return PaymentMethod.CASH;
+        case 'CARD':
+          return PaymentMethod.CREDIT_CARD; // Par défaut, utiliser CREDIT_CARD pour CARD
+        case 'MOBILE_MONEY':
+          return PaymentMethod.OTHER; // Mobile money générique
+        case 'OM':
+          return PaymentMethod.ORANGE_MONEY_CI;
+        case 'WAVE':
+          return PaymentMethod.WAVE_CI;
+        case 'MTN':
+          return PaymentMethod.MTN_CI;
+        case 'MOOV':
+          return PaymentMethod.MOOV_CI;
+        case 'OTHER':
+          return PaymentMethod.OTHER;
+        default:
+          return PaymentMethod.OTHER;
+      }
+    };
+
+    // Pour les commandes manuelles, le paiement est toujours considéré comme complété
+    const paymentStatus = 'COMPLETED';
     await (this.prisma as any).payment.create({
       data: {
         invoiceId: invoice.id,
         amount: invoiceTotal,
-        method: createManualOrderDto.paymentMethod,
+        method: mapPaymentMethod(createManualOrderDto.paymentMethod),
         status: paymentStatus,
-        paidAt: paymentStatus === 'COMPLETED' ? new Date() : null,
+        paidAt: new Date(), // Toujours marquer comme payé pour les commandes manuelles
       },
     });
 
+    // Mapper la méthode de paiement du DTO vers l'enum Prisma
+    const mapPaymentName = (method: string): String => {
+      switch (method) {
+        case 'CASH':
+          return "en especes";
+        case 'CARD':
+          return "par carte"; // Par défaut, utiliser CREDIT_CARD pour CARD
+        case 'OM':
+          return "par orange money"; // Ou une valeur mobile money spécifique selon le besoin
+        case 'WAVE':
+          return "par wave";
+        case 'MTN':
+          return "par mtn";
+        case 'MOOV':
+          return "par moov money";
+        default:
+          return "autres moyens de paiement";
+      }
+    };
     // Si le paiement est en espèces et qu'un manager a créé la commande, créer une transaction de caisse
-    if (createManualOrderDto.paymentMethod === 'CASH' && managerId && this.cashRegistersService) {
+    if (/* createManualOrderDto.paymentMethod === 'CASH' && */ managerId && this.cashRegistersService) {
       try {
         const cashRegister = await this.cashRegistersService.getTodayCashRegister(managerId);
         // Vérifier que la caisse est ouverte (peut être 'OPEN' ou l'enum)
@@ -774,7 +818,7 @@ export class OrdersService {
             {
               type: CashRegisterTransactionType.CASH_SALE,
               amount: invoiceTotal,
-              description: `Vente en espèces - Commande #${order.id}`,
+              description: `Vente - paiement ${mapPaymentName(createManualOrderDto.paymentMethod)} - Commande #${order.id}`,
               orderId: order.id,
             }
           );
