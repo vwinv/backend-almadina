@@ -79,8 +79,8 @@ export class DeliveryPersonsController {
     @Param('orderId', ParseIntPipe) orderId: number,
     @CurrentUser() user: any,
   ) {
-    if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN) {
-      throw new ForbiddenException('Accès refusé. Cette route est réservée aux administrateurs.');
+    if (user.role !== UserRole.ADMIN && user.role !== UserRole.SUPER_ADMIN && user.role !== UserRole.MANAGER) {
+      throw new ForbiddenException('Accès refusé. Cette route est réservée aux administrateurs et managers.');
     }
     return this.deliveryPersonsService.assignToOrder(deliveryPersonId, orderId);
   }

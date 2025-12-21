@@ -33,8 +33,8 @@ SMTP_PASSWORD=votre-mot-de-passe-application  # Utilisez un mot de passe d'appli
 SMTP_HOST=smtp.office365.com
 SMTP_PORT=587
 SMTP_SECURE=false
-SMTP_USER=contact@almadinahboutique.com
-SMTP_PASSWORD=Welcometocanada@2025
+SMTP_USER=votre-email@outlook.com
+SMTP_PASSWORD=votre-mot-de-passe
 ```
 
 ## Notes importantes

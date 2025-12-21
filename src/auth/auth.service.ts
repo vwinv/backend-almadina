@@ -244,6 +244,10 @@ export class AuthService {
   }
 
   async googleAuth(googleCallbackDto: GoogleCallbackDto) {
+    return this.googleAuthWithRole(googleCallbackDto, UserRole.CUSTOMER);
+  }
+
+  async googleAuthWithRole(googleCallbackDto: GoogleCallbackDto, targetRole: UserRole) {
     try {
       // Décoder le token Google (JWT) sans vérification complète (à améliorer avec google-auth-library)
       const tokenParts = googleCallbackDto.credential.split('.');
@@ -282,12 +286,12 @@ export class AuthService {
               password: hashedPassword, // Mot de passe aléatoire car l'utilisateur se connectera via Google
               firstName: firstName,
               lastName: lastName,
-              role: UserRole.CUSTOMER,
+              role: targetRole, // CUSTOMER pour client, MANAGER pour caisse
               profilePicture: payload.picture || null,
               phone: null, // Pas de téléphone car Google ne fournit pas cette information
             },
           });
-          console.log(`Utilisateur Google créé avec succès: ${user.email}`);
+          console.log(`Utilisateur Google créé avec succès (${targetRole}): ${user.email}`);
         } catch (createError: any) {
           console.error('Erreur lors de la création de l\'utilisateur Google:', createError);
           // Si l'email existe déjà (conflit), essayer de le récupérer
@@ -303,6 +307,15 @@ export class AuthService {
           }
         }
       } else {
+        // Vérifier que le rôle de l'utilisateur existant correspond au rôle attendu
+        if (user.role !== targetRole) {
+          throw new UnauthorizedException(
+            targetRole === UserRole.MANAGER
+              ? 'Cet utilisateur n\'a pas les droits de gestionnaire'
+              : 'Cet utilisateur n\'a pas les droits de client'
+          );
+        }
+
         // Utilisateur existe déjà, mettre à jour la photo de profil si elle a changé
         if (payload.picture && user.profilePicture !== payload.picture) {
           user = await this.prisma.user.update({

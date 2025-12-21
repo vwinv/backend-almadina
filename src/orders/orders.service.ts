@@ -276,6 +276,7 @@ export class OrdersService {
             email: true,
             firstName: true,
             lastName: true,
+            phone: true,
           },
         },
         items: {

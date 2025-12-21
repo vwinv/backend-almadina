@@ -50,6 +50,62 @@ export class CashRegistersService {
       throw new BadRequestException('Une caisse est déjà ouverte pour aujourd\'hui');
     }
 
+    // Fermer automatiquement toute caisse ouverte d'une date passée
+    const oldOpenCashRegister = await (this.prisma as any).cashRegister.findFirst({
+      where: {
+        userId,
+        status: CashRegisterStatus.OPEN,
+        date: {
+          lt: today, // Date antérieure à aujourd'hui
+        },
+      },
+      include: {
+        transactions: true,
+      },
+    });
+
+    let lastClosedBalance: Decimal | null = null;
+
+    if (oldOpenCashRegister) {
+      // Calculer le solde attendu de la caisse ouverte de date passée
+      try {
+        const expectedBalance = this.calculateExpectedBalance(oldOpenCashRegister);
+        
+        // Fermer automatiquement cette caisse
+        // actualBalance est le solde de fermeture (closingBalance = actualBalance)
+        const closingBalance = expectedBalance;
+        
+        await (this.prisma as any).cashRegister.update({
+          where: { id: oldOpenCashRegister.id },
+          data: {
+            closeTime: new Date(),
+            status: CashRegisterStatus.CLOSED,
+            closingBalance: closingBalance,
+            expectedBalance: expectedBalance,
+            actualBalance: closingBalance,
+            difference: new Decimal(0),
+          },
+        });
+
+        // Créer la transaction de fermeture séparément pour éviter les problèmes de transaction imbriquée
+        await (this.prisma as any).cashRegisterTransaction.create({
+          data: {
+            cashRegisterId: oldOpenCashRegister.id,
+            type: CashRegisterTransactionType.CLOSING,
+            amount: expectedBalance,
+            description: `Fermeture automatique - Date passée. Solde calculé: ${expectedBalance}`,
+          },
+        });
+        
+        lastClosedBalance = expectedBalance;
+        this.logger.log(`Caisse ${oldOpenCashRegister.id} (date passée) fermée automatiquement avant ouverture d'une nouvelle caisse`);
+      } catch (error) {
+        this.logger.error(`Erreur lors de la fermeture automatique de la caisse ${oldOpenCashRegister.id}:`, error);
+        // Si on ne peut pas fermer la caisse, on ne peut pas continuer
+        throw new BadRequestException(`Impossible de fermer la caisse de date passée. Erreur: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
     // Chercher d'abord une caisse fermée existante pour aujourd'hui
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -75,19 +131,63 @@ export class CashRegistersService {
           userId,
           status: CashRegisterStatus.CLOSED,
         },
-        orderBy: {
-          date: 'desc',
-          createdAt: 'desc',
-        },
+        orderBy: [
+          { date: 'desc' },
+          { createdAt: 'desc' },
+        ],
       });
     }
 
     let openingBalance: Decimal;
-    if (existingClosedCashRegister) {
-      // Utiliser le solde de fermeture (closingBalance) ou le solde réel (actualBalance) de la dernière caisse fermée
+    
+    // Utiliser le solde de la caisse qu'on vient de fermer, ou celui de la dernière caisse fermée
+    if (lastClosedBalance !== null) {
+      // Si on vient de fermer une caisse de date passée, utiliser son solde
+      openingBalance = lastClosedBalance;
+      // Créer directement une nouvelle caisse pour aujourd'hui
+      const newCashRegister = await (this.prisma as any).cashRegister.create({
+        data: {
+          userId,
+          date: today,
+          status: CashRegisterStatus.OPEN,
+          openTime: new Date(),
+          openingBalance: openingBalance,
+        },
+      });
+
+      // Créer une transaction d'ouverture
+      await (this.prisma as any).cashRegisterTransaction.create({
+        data: {
+          cashRegisterId: newCashRegister.id,
+          type: CashRegisterTransactionType.OPENING,
+          amount: openingBalance,
+          description: `Ouverture de caisse - Solde initial: ${openingBalance}`,
+        },
+      });
+
+      return await (this.prisma as any).cashRegister.findUnique({
+        where: { id: newCashRegister.id },
+        include: {
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+          transactions: {
+            orderBy: {
+              createdAt: 'desc',
+            },
+            take: 10,
+          },
+        },
+      });
+    } else if (existingClosedCashRegister) {
+      // Utiliser le solde de fermeture (actualBalance, qui est le solde de fermeture)
       // S'il n'y en a pas, utiliser le solde d'ouverture
-      openingBalance = existingClosedCashRegister.closingBalance || 
-                      existingClosedCashRegister.actualBalance || 
+      openingBalance = existingClosedCashRegister.actualBalance || 
+                      existingClosedCashRegister.closingBalance || 
                       existingClosedCashRegister.openingBalance || 
                       new Decimal(0);
 
@@ -206,19 +306,18 @@ export class CashRegistersService {
       throw new BadRequestException('Cette caisse est déjà fermée');
     }
 
-    // Calculer le solde attendu
+    // Calculer le solde attendu (solde de fermeture)
     const expectedBalance = this.calculateExpectedBalance(cashRegister);
 
-    // Utiliser le solde réel fourni ou le solde attendu
+    // Utiliser le solde réel fourni (optionnel) ou utiliser le solde attendu comme solde de fermeture
     const actualBalance = closeCashRegisterDto.actualBalance 
       ? new Decimal(closeCashRegisterDto.actualBalance)
       : expectedBalance;
 
-    const closingBalance = closeCashRegisterDto.closingBalance
-      ? new Decimal(closeCashRegisterDto.closingBalance)
-      : actualBalance;
+    // actualBalance est le solde de fermeture, donc closingBalance = actualBalance
+    const closingBalance = actualBalance;
 
-    const difference = closingBalance.minus(expectedBalance);
+    const difference = actualBalance.minus(expectedBalance);
 
     // Fermer la caisse
     const updatedCashRegister = await (this.prisma as any).cashRegister.update({
@@ -234,7 +333,7 @@ export class CashRegistersService {
           create: {
             type: CashRegisterTransactionType.CLOSING,
             amount: closingBalance,
-            description: `Fermeture de caisse - Solde attendu: ${expectedBalance}, Solde réel: ${actualBalance}`,
+            description: `Fermeture de caisse - Solde de fermeture: ${closingBalance}${actualBalance !== expectedBalance ? ` (Solde réel ajusté: ${actualBalance})` : ''}`,
           },
         },
       },
@@ -285,10 +384,12 @@ export class CashRegistersService {
     const difference = actualBalance.minus(expectedBalance);
 
     // Mettre à jour avec les valeurs de réconciliation
+    // actualBalance est le solde de fermeture, donc closingBalance = actualBalance
     const reconciledCashRegister = await (this.prisma as any).cashRegister.update({
       where: { id: cashRegisterId },
       data: {
         actualBalance,
+        closingBalance: actualBalance, // Synchroniser closingBalance avec actualBalance
         difference,
         notes: reconcileDto.notes,
         transactions: {
@@ -556,9 +657,9 @@ export class CashRegistersService {
         // Calculer le solde attendu
         const expectedBalance = this.calculateExpectedBalance(cashRegister);
         
-        // Utiliser le solde attendu comme solde réel et solde de fermeture
+        // Utiliser le solde attendu comme solde de fermeture (actualBalance = closingBalance)
         const actualBalance = expectedBalance;
-        const closingBalance = expectedBalance;
+        const closingBalance = actualBalance;
         const difference = new Decimal(0);
 
         // Fermer la caisse
@@ -655,7 +756,8 @@ export class CashRegistersService {
 
     cashRegisters.forEach((cr: any) => {
       totalOpening = totalOpening.plus(cr.openingBalance || 0);
-      totalClosing = totalClosing.plus(cr.closingBalance || cr.actualBalance || 0);
+      // actualBalance est le solde de fermeture
+      totalClosing = totalClosing.plus(cr.actualBalance || cr.closingBalance || 0);
       totalDifference = totalDifference.plus(cr.difference || 0);
 
       cr.transactions?.forEach((tx: any) => {
@@ -755,8 +857,8 @@ export class CashRegistersService {
       doc.fontSize(10);
       doc.text(`Statut: ${cr.status}`);
       doc.text(`Solde d'ouverture: ${Number(cr.openingBalance).toFixed(2)} CFA`);
-      doc.text(`Solde réel: ${Number(cr.actualBalance || cr.closingBalance || 0).toFixed(2)} CFA`);
-      doc.text(`Solde de fermeture: ${Number(cr.closingBalance || 0).toFixed(2)} CFA`);
+      // actualBalance est le solde de fermeture
+      doc.text(`Solde de fermeture: ${Number(cr.actualBalance || cr.closingBalance || 0).toFixed(2)} CFA`);
       if (cr.difference !== null && cr.difference !== undefined) {
         doc.text(`Différence: ${Number(cr.difference).toFixed(2)} CFA`);
       }

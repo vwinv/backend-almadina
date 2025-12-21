@@ -109,6 +109,12 @@ export class AuthController {
     return this.authService.googleAuth(googleCallbackDto);
   }
 
+  @Post('google/caisse/callback')
+  async googleCaisseCallback(@Body() googleCallbackDto: GoogleCallbackDto) {
+    console.log('Received Google caisse callback request:', { credential: googleCallbackDto.credential?.substring(0, 50) + '...' });
+    return this.authService.googleAuthWithRole(googleCallbackDto, UserRole.MANAGER);
+  }
+
   @Post('facebook/callback')
   async facebookCallback(@Body() facebookCallbackDto: FacebookCallbackDto) {
     return this.authService.facebookAuth(facebookCallbackDto);

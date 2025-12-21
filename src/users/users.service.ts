@@ -1,8 +1,9 @@
-import { Injectable, ConflictException } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 import { CreateUserDto } from './dto/create-user.dto';
 import { NotificationService } from './services/notification.service';
+import { EmailService } from '../email/email.service';
 import { generateRandomPassword } from '../utils/password-generator.util';
 import { normalizePhoneNumber } from '../utils/phone-normalizer.util';
 import { UserRole } from '@prisma/client';
@@ -14,6 +15,7 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationService: NotificationService,
+    private readonly emailService?: EmailService,
   ) {}
 
   async findAllCustomers(search?: string) {
@@ -118,7 +120,63 @@ export class UsersService {
     return customer || null;
   }
 
-  async createCustomer(data: { firstName: string; lastName: string; phone: string; email?: string }) {
+  async findCustomerByPhoneOrEmail(search: string) {
+    // Vérifier si c'est un email (contient @) ou un numéro de téléphone
+    const isEmail = search.includes('@');
+    
+    if (isEmail) {
+      // Recherche par email
+      const customer = await this.prisma.user.findFirst({
+        where: {
+          role: 'CUSTOMER',
+          email: {
+            equals: search,
+            mode: 'insensitive',
+          },
+        },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+        },
+      });
+      return customer || null;
+    } else {
+      // Recherche par téléphone (comme findCustomerByPhone)
+      const normalizedPhone = normalizePhoneNumber(search);
+      
+      if (!normalizedPhone) {
+        return null;
+      }
+
+      const customers = await this.prisma.user.findMany({
+        where: {
+          role: 'CUSTOMER',
+          phone: {
+            not: null,
+          },
+        },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+        },
+      });
+
+      const customer = customers.find(c => {
+        const customerNormalizedPhone = normalizePhoneNumber(c.phone);
+        return customerNormalizedPhone === normalizedPhone;
+      });
+
+      return customer || null;
+    }
+  }
+
+  async createCustomer(data: { firstName: string; lastName: string; phone: string; email: string }) {
     // Normaliser le numéro de téléphone avant de vérifier s'il existe
     const normalizedPhone = normalizePhoneNumber(data.phone);
     
@@ -128,21 +186,102 @@ export class UsersService {
       throw new ConflictException('Un client avec ce numéro de téléphone existe déjà');
     }
 
-    // Générer un email temporaire si non fourni
-    const email = data.email || `customer_${Date.now()}@temp.com`;
-    
-    // Générer un mot de passe temporaire (hashé)
-    const hashedPassword = await bcrypt.hash('temp123', 10);
+    // Vérifier si un client avec cet email existe déjà
+    const existingCustomerByEmail = await this.prisma.user.findUnique({
+      where: { email: data.email },
+    });
+    if (existingCustomerByEmail) {
+      throw new ConflictException('Un client avec cet email existe déjà');
+    }
 
-    return this.prisma.user.create({
+    // Générer un mot de passe aléatoire sécurisé
+    const plainPassword = generateRandomPassword(12);
+    const hashedPassword = await bcrypt.hash(plainPassword, 10);
+
+    const customer = await this.prisma.user.create({
       data: {
-        email,
+        email: data.email,
         password: hashedPassword,
         firstName: data.firstName,
         lastName: data.lastName,
         phone: normalizedPhone, // Sauvegarder le numéro normalisé
         role: 'CUSTOMER',
       },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+      },
+    });
+
+    // Envoyer l'email avec les accès
+    if (this.emailService) {
+      this.emailService.sendCustomerAccessEmail({
+        customerName: `${data.firstName} ${data.lastName}`,
+        customerEmail: data.email,
+        password: plainPassword,
+        phone: normalizedPhone,
+      }).catch((error) => {
+        console.error('Erreur lors de l\'envoi de l\'email d\'accès:', error);
+        // Ne pas faire échouer la création si l'email échoue
+      });
+    }
+
+    return customer;
+  }
+
+  async updateCustomer(id: number, data: { firstName?: string; lastName?: string; phone?: string; email?: string }) {
+    const customer = await this.prisma.user.findUnique({
+      where: { id },
+    });
+
+    if (!customer || customer.role !== 'CUSTOMER') {
+      throw new NotFoundException('Client introuvable');
+    }
+
+    const updateData: any = {};
+
+    if (data.firstName !== undefined) {
+      updateData.firstName = data.firstName;
+    }
+    if (data.lastName !== undefined) {
+      updateData.lastName = data.lastName;
+    }
+    if (data.phone !== undefined) {
+      const normalizedPhone = normalizePhoneNumber(data.phone);
+      // Vérifier si un autre client avec ce numéro existe
+      const existingCustomer = await this.prisma.user.findFirst({
+        where: {
+          phone: normalizedPhone,
+          role: 'CUSTOMER',
+          id: { not: id },
+        },
+      });
+      if (existingCustomer) {
+        throw new ConflictException('Un autre client avec ce numéro de téléphone existe déjà');
+      }
+      updateData.phone = normalizedPhone;
+    }
+    if (data.email !== undefined && data.email !== customer.email) {
+      // Vérifier si un autre client avec cet email existe
+      const existingCustomerByEmail = await this.prisma.user.findFirst({
+        where: {
+          email: data.email,
+          role: 'CUSTOMER',
+          id: { not: id },
+        },
+      });
+      if (existingCustomerByEmail) {
+        throw new ConflictException('Un autre client avec cet email existe déjà');
+      }
+      updateData.email = data.email;
+    }
+
+    return this.prisma.user.update({
+      where: { id },
+      data: updateData,
       select: {
         id: true,
         email: true,
