@@ -34,7 +34,7 @@ export class EmailService {
   constructor(private readonly configService: ConfigService) {
     // Le transporter sera initialisé avec les identifiants du compte expéditeur
     // Configuration via variables d'environnement
-    this.logger.log('Initialisation du service email...');
+    this.logger.warn('Initialisation du service email...');
     this.initializeTransporter();
   }
 
@@ -47,7 +47,7 @@ export class EmailService {
     const pass = this.configService.get<string>('SMTP_PASSWORD') ?? process.env.SMTP_PASSWORD ?? '';
 
     // Log de debug complet pour comprendre la configuration en prod
-    this.logger.log(`EmailService config (brut): SMTP_HOST=${host}, SMTP_PORT=${portRaw}, SMTP_SECURE=${secureRaw}, SMTP_USER=${user ? 'SET' : 'MISSING'}, SMTP_PASSWORD=${pass ? 'SET' : 'MISSING'}`);
+    this.logger.warn(`EmailService config (brut): SMTP_HOST=${host}, SMTP_PORT=${portRaw}, SMTP_SECURE=${secureRaw}, SMTP_USER=${user ? 'SET' : 'MISSING'}, SMTP_PASSWORD=${pass ? 'SET' : 'MISSING'}`);
 
     const emailConfig = {
       host,
@@ -59,7 +59,7 @@ export class EmailService {
       },
     };
 
-    this.logger.log(`EmailService config (normalisée): host=${emailConfig.host}, port=${emailConfig.port}, secure=${emailConfig.secure}, user=${emailConfig.auth.user ? 'SET' : 'MISSING'}, pass=${emailConfig.auth.pass ? 'SET' : 'MISSING'}`);
+    this.logger.warn(`EmailService config (normalisée): host=${emailConfig.host}, port=${emailConfig.port}, secure=${emailConfig.secure}, user=${emailConfig.auth.user ? 'SET' : 'MISSING'}, pass=${emailConfig.auth.pass ? 'SET' : 'MISSING'}`);
 
     // Ne créer le transporter que si les identifiants sont configurés
     if (emailConfig.auth.user && emailConfig.auth.pass) {
