@@ -103,8 +103,8 @@ export class OrdersController {
   @Post(':id/cancel')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.MANAGER)
-  cancel(@Param('id', ParseIntPipe) id: number) {
-    return this.ordersService.cancel(id);
+  cancel(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+    return this.ordersService.cancel(id, user);
   }
 
   @Post(':id/validate-payment')

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import { OrderStatus } from '@prisma/client';
 
@@ -30,7 +31,7 @@ export class EmailService {
   private readonly logger = new Logger(EmailService.name);
   private transporter: nodemailer.Transporter | null = null;
 
-  constructor() {
+  constructor(private readonly configService: ConfigService) {
     // Le transporter sera initialisé avec les identifiants du compte expéditeur
     // Configuration via variables d'environnement
     this.initializeTransporter();
@@ -38,12 +39,12 @@ export class EmailService {
 
   private initializeTransporter() {
     const emailConfig = {
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: process.env.SMTP_SECURE === 'true', // true pour 465, false pour autres ports
+      host: this.configService.get<string>('SMTP_HOST') || 'smtp.gmail.com',
+      port: parseInt(this.configService.get<string>('SMTP_PORT') || '587'),
+      secure: this.configService.get<string>('SMTP_SECURE')  === 'true', // true pour 465, false pour autres ports
       auth: {
-        user: process.env.SMTP_USER || '',
-        pass: process.env.SMTP_PASSWORD || '',
+        user: this.configService.get<string>('SMTP_USER')  || '',
+        pass: this.configService.get<string>('SMTP_PASSWORD')  || '',
       },
     };
 

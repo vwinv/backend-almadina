@@ -19,7 +19,10 @@ async function bootstrap() {
     'https://www.almadinahboutique.com',
     process.env.FRONTEND_URL,
     'http://localhost:3000',
-  ].filter(Boolean); // Enlève les valeurs undefined/null
+    'http://localhost:5173',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:5173',
+  ].filter(Boolean);
 
   app.enableCors({
     origin: (origin, callback) => {
@@ -30,7 +33,13 @@ async function bootstrap() {
       if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        callback(new Error('Not allowed by CORS'));
+        // En développement, autoriser localhost et 127.0.0.1 avec n'importe quel port
+        if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+          callback(null, true);
+        } else {
+          console.warn(`CORS: Origin non autorisée: ${origin}`);
+          callback(new Error('Not allowed by CORS'));
+        }
       }
     },
     credentials: true,

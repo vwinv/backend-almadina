@@ -264,45 +264,88 @@ export class AuthService {
       }
 
       // Vérifier si l'utilisateur existe avec cet email
-      const user = await this.prisma.user.findUnique({
+      let user = await this.prisma.user.findUnique({
         where: { email: payload.email },
       });
 
-      // Si l'utilisateur n'existe pas, refuser l'accès
+      // Si l'utilisateur n'existe pas
       if (!user) {
-        throw new UnauthorizedException('Votre compte n\'existe pas. Veuillez contacter l\'administrateur.');
-      }
+        // Pour les clients (boutique), créer l'utilisateur s'il n'existe pas
+        if (targetRole === UserRole.CUSTOMER) {
+          // Générer un mot de passe aléatoire (l'utilisateur n'en aura pas besoin pour se connecter via Google)
+          const randomPassword = Math.random().toString(36).slice(-16);
+          const hashedPassword = await bcrypt.hash(randomPassword, 10);
 
-      // Vérifier que le rôle de l'utilisateur correspond au rôle attendu
-      if (targetRole === UserRole.MANAGER && user.role !== UserRole.MANAGER) {
-        throw new UnauthorizedException('Ce compte n\'est pas gestionnaire. Veuillez contacter l\'administrateur.');
-      }
+          // Extraire le prénom et nom depuis le payload Google
+          const firstName = payload.given_name || payload.name?.split(' ')[0] || 'Utilisateur';
+          const lastName = payload.family_name || payload.name?.split(' ').slice(1).join(' ') || 'Google';
 
-      // Mettre à jour la photo de profil si elle a changé
-      let updatedUser = user;
-      if (payload.picture && user.profilePicture !== payload.picture) {
-        updatedUser = await this.prisma.user.update({
-          where: { id: user.id },
-          data: { profilePicture: payload.picture },
-        });
+          // Créer l'utilisateur dans la base de données
+          try {
+            user = await this.prisma.user.create({
+              data: {
+                email: payload.email,
+                password: hashedPassword,
+                firstName: firstName,
+                lastName: lastName,
+                role: UserRole.CUSTOMER,
+                profilePicture: payload.picture || null,
+                phone: null,
+              },
+            });
+            console.log(`Utilisateur Google créé avec succès (CUSTOMER): ${user.email}`);
+          } catch (createError: any) {
+            console.error('Erreur lors de la création de l\'utilisateur Google:', createError);
+            if (createError.code === 'P2002' && createError.meta?.target?.includes('email')) {
+              user = await this.prisma.user.findUnique({
+                where: { email: payload.email },
+              });
+              if (!user) {
+                throw new BadRequestException('Erreur lors de la création de l\'utilisateur');
+              }
+            } else {
+              throw new BadRequestException('Erreur lors de la création de l\'utilisateur: ' + createError.message);
+            }
+          }
+        } else {
+          // Pour les managers (caisse), refuser l'accès si l'utilisateur n'existe pas
+          throw new UnauthorizedException('Votre compte n\'existe pas. Veuillez contacter l\'administrateur.');
+        }
+      } else {
+        // Utilisateur existe déjà
+        // Vérifier que le rôle de l'utilisateur correspond au rôle attendu
+        if (targetRole === UserRole.MANAGER && user.role !== UserRole.MANAGER) {
+          throw new UnauthorizedException('Ce compte n\'est pas gestionnaire. Veuillez contacter l\'administrateur.');
+        }
+        if (targetRole === UserRole.CUSTOMER && user.role !== UserRole.CUSTOMER) {
+          throw new UnauthorizedException('Ce compte n\'est pas un compte client. Veuillez utiliser l\'espace approprié.');
+        }
+
+        // Mettre à jour la photo de profil si elle a changé
+        if (payload.picture && user.profilePicture !== payload.picture) {
+          user = await this.prisma.user.update({
+            where: { id: user.id },
+            data: { profilePicture: payload.picture },
+          });
+        }
       }
 
       // Générer le token JWT pour notre application
       const jwtPayload: JwtPayload = {
-        sub: updatedUser.id,
-        email: updatedUser.email,
-        role: updatedUser.role,
+        sub: user.id,
+        email: user.email,
+        role: user.role,
       };
 
       return {
         access_token: this.jwtService.sign(jwtPayload),
         user: {
-          id: updatedUser.id,
-          email: updatedUser.email,
-          firstName: updatedUser.firstName,
-          lastName: updatedUser.lastName,
-          profilePicture: updatedUser.profilePicture,
-          role: updatedUser.role,
+          id: user.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          profilePicture: user.profilePicture,
+          role: user.role,
         },
       };
     } catch (error) {

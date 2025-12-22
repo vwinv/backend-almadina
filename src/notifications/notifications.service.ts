@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
+import { UserRole } from '@prisma/client';
 
 @Injectable()
 export class NotificationsService {
@@ -27,6 +28,40 @@ export class NotificationsService {
         link: createNotificationDto.link || null,
       },
     });
+  }
+
+  /**
+   * Crée une notification pour tous les administrateurs et gestionnaires
+   */
+  async createForAdminsAndManagers(createNotificationDto: Omit<CreateNotificationDto, 'userId'>) {
+    // Récupérer tous les utilisateurs avec le rôle ADMIN, SUPER_ADMIN ou MANAGER
+    const adminsAndManagers = await this.prisma.user.findMany({
+      where: {
+        role: {
+          in: [UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.MANAGER],
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    // Créer une notification pour chaque admin/manager
+    const notifications = await Promise.all(
+      adminsAndManagers.map((user) =>
+        (this.prisma as any).notification.create({
+          data: {
+            userId: user.id,
+            title: createNotificationDto.title,
+            message: createNotificationDto.message,
+            type: createNotificationDto.type || 'INFO',
+            link: createNotificationDto.link || null,
+          },
+        })
+      )
+    );
+
+    return notifications;
   }
 
   async findAll(userId?: number) {
@@ -76,6 +111,18 @@ export class NotificationsService {
     return (this.prisma as any).notification.update({
       where: { id: notificationId },
       data: { isRead: true },
+    });
+  }
+
+  /**
+   * Compte les notifications non lues pour un utilisateur
+   */
+  async countUnread(userId: number): Promise<number> {
+    return (this.prisma as any).notification.count({
+      where: {
+        userId,
+        isRead: false,
+      },
     });
   }
 }

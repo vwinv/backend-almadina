@@ -5,8 +5,9 @@ import { UpdateOrderDto } from './dto/update-order.dto';
 import { CreateManualOrderDto } from './dto/create-manual-order.dto';
 import { CashRegistersService } from '../cash-registers/cash-registers.service';
 import { CashRegisterTransactionType } from '../cash-registers/types/cash-register.types';
-import { StockMovementType, OrderStatus, PaymentMethod } from '@prisma/client';
+import { StockMovementType, OrderStatus, PaymentMethod, UserRole } from '@prisma/client';
 import { EmailService } from '../email/email.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { sendOrderStatusEmail } from './helpers/order-email.helper';
 
 @Injectable()
@@ -16,6 +17,7 @@ export class OrdersService {
     @Inject(forwardRef(() => CashRegistersService))
     private readonly cashRegistersService?: CashRegistersService,
     private readonly emailService?: EmailService,
+    private readonly notificationsService?: NotificationsService,
   ) {}
 
   async create(createOrderDto: CreateOrderDto) {
@@ -184,6 +186,23 @@ export class OrdersService {
     // Mettre à jour le stock des produits commandés
     await this.updateProductStockForOrder(order.id, orderItems);
 
+    // Créer une notification pour les administrateurs et gestionnaires le plus tôt possible
+    if (this.notificationsService && order.user) {
+      const user = order.user as { firstName?: string; lastName?: string };
+      const customerName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Client';
+
+      this.notificationsService
+        .createForAdminsAndManagers({
+          title: 'Nouvelle commande',
+          message: `Une nouvelle commande #${order.id} a été passée par ${customerName} pour un montant de ${total.toLocaleString('fr-FR')} FCFA`,
+          type: 'INFO',
+          link: `/admin/commandes/${order.id}`,
+        })
+        .catch((err) => {
+          console.error('Erreur lors de la création de la notification:', err);
+        });
+    }
+
     // Récupérer la commande complète avec toutes les relations pour l'email
     const orderForEmail = await this.prisma.order.findUnique({
       where: { id: order.id },
@@ -218,7 +237,7 @@ export class OrdersService {
     // Envoyer l'email de confirmation de commande (PENDING)
     if (orderForEmail) {
       sendOrderStatusEmail(this.emailService, orderForEmail, OrderStatus.PENDING).catch((err) => {
-        console.error('Erreur lors de l\'envoi de l\'email de confirmation:', err);
+        console.error("Erreur lors de l'envoi de l'email de confirmation:", err);
       });
     }
 
@@ -443,7 +462,7 @@ export class OrdersService {
     return updatedOrder;
   }
 
-  async cancel(id: number) {
+  async cancel(id: number, currentUser?: { role?: UserRole | string }) {
     const order = await this.prisma.order.findUnique({
       where: { id },
       include: {
@@ -459,7 +478,50 @@ export class OrdersService {
       throw new NotFoundException(`Commande avec l'ID ${id} introuvable`);
     }
 
-    // Vérifier si le paiement a été effectué
+    // Rôle normalisé du user courant
+    const normalizedRole = currentUser?.role
+      ? String(currentUser.role).toUpperCase().replace(/\s+/g, '_')
+      : null;
+
+    // Si SUPER_ADMIN : peut annuler quelle que soit la commande / le paiement
+    if (normalizedRole === 'SUPER_ADMIN') {
+      const cancelledOrder = await this.prisma.order.update({
+        where: { id },
+        data: { status: 'CANCELLED' as any },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+              phone: true,
+            },
+          },
+          items: {
+            include: {
+              product: true,
+            },
+          },
+          shippingAddress: {
+            include: {
+              deliveryZone: true,
+            },
+          },
+          deliveryPerson: true,
+          invoice: {
+            include: {
+              payment: true,
+            },
+          },
+        },
+      } as any);
+
+      // Pas d'email automatique pour l'instant, mais on pourrait en envoyer ici si besoin
+      return cancelledOrder;
+    }
+
+    // Pour ADMIN / MANAGER : interdiction si paiement déjà COMPLETED
     if (order.invoice?.payment?.status === 'COMPLETED') {
       throw new BadRequestException('Impossible d\'annuler une commande déjà payée');
     }
