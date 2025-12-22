@@ -34,19 +34,32 @@ export class EmailService {
   constructor(private readonly configService: ConfigService) {
     // Le transporter sera initialisé avec les identifiants du compte expéditeur
     // Configuration via variables d'environnement
+    this.logger.log('Initialisation du service email...');
     this.initializeTransporter();
   }
 
   private initializeTransporter() {
+    // Lire les variables via ConfigService pour pouvoir les logger
+    const host = this.configService.get<string>('SMTP_HOST') || process.env.SMTP_HOST || 'smtp.gmail.com';
+    const portRaw = this.configService.get<string>('SMTP_PORT') ?? process.env.SMTP_PORT ?? '587';
+    const secureRaw = this.configService.get<string>('SMTP_SECURE') ?? process.env.SMTP_SECURE ?? 'false';
+    const user = this.configService.get<string>('SMTP_USER') ?? process.env.SMTP_USER ?? '';
+    const pass = this.configService.get<string>('SMTP_PASSWORD') ?? process.env.SMTP_PASSWORD ?? '';
+
+    // Log de debug complet pour comprendre la configuration en prod
+    this.logger.log(`EmailService config (brut): SMTP_HOST=${host}, SMTP_PORT=${portRaw}, SMTP_SECURE=${secureRaw}, SMTP_USER=${user ? 'SET' : 'MISSING'}, SMTP_PASSWORD=${pass ? 'SET' : 'MISSING'}`);
+
     const emailConfig = {
-      host: this.configService.get<string>('SMTP_HOST') || 'smtp.gmail.com',
-      port: parseInt(this.configService.get<string>('SMTP_PORT') || '587'),
-      secure: this.configService.get<string>('SMTP_SECURE')  === 'true', // true pour 465, false pour autres ports
+      host,
+      port: parseInt(portRaw || '587'),
+      secure: String(secureRaw).toLowerCase() === 'true', // true pour 465, false pour autres ports
       auth: {
-        user: this.configService.get<string>('SMTP_USER')  || '',
-        pass: this.configService.get<string>('SMTP_PASSWORD')  || '',
+        user: user || '',
+        pass: pass || '',
       },
     };
+
+    this.logger.log(`EmailService config (normalisée): host=${emailConfig.host}, port=${emailConfig.port}, secure=${emailConfig.secure}, user=${emailConfig.auth.user ? 'SET' : 'MISSING'}, pass=${emailConfig.auth.pass ? 'SET' : 'MISSING'}`);
 
     // Ne créer le transporter que si les identifiants sont configurés
     if (emailConfig.auth.user && emailConfig.auth.pass) {
@@ -56,7 +69,7 @@ export class EmailService {
         // Vérifier la configuration
         this.transporter.verify((error, success) => {
           if (error) {
-            this.logger.error('Erreur de configuration email:', error);
+            this.logger.error('Erreur de configuration email (verify):', error);
             this.transporter = null;
           } else {
             this.logger.log('Service email configuré avec succès');
