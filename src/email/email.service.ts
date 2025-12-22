@@ -48,6 +48,15 @@ export class EmailService {
 
     // Log de debug complet pour comprendre la configuration en prod
     this.logger.warn(`EmailService config (brut): SMTP_HOST=${host}, SMTP_PORT=${portRaw}, SMTP_SECURE=${secureRaw}, SMTP_USER=${user ? 'SET' : 'MISSING'}, SMTP_PASSWORD=${pass ? 'SET' : 'MISSING'}`);
+    // Log direct console pour Render (stdout/stderr)
+    // ATTENTION: ne laisse pas ces logs en prod à long terme si cela t'embête
+    console.error('[EmailService] RAW SMTP CONFIG:', {
+      host,
+      portRaw,
+      secureRaw,
+      hasUser: !!user,
+      hasPass: !!pass,
+    });
 
     const emailConfig = {
       host,
