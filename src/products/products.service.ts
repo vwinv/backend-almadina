@@ -11,7 +11,7 @@ export class ProductsService {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => InventoryService))
     private readonly inventoryService: InventoryService,
-  ) {}
+  ) { }
 
   async create(createProductDto: CreateProductDto) {
     const { images: imageUrls, videos: videoUrls, categoryId, subCategoryId, ...restData } = createProductDto;
@@ -48,7 +48,7 @@ export class ProductsService {
 
     // Le produit peut avoir une catégorie et optionnellement une sous-catégorie
     data.category = { connect: { id: normalizedCategoryId } };
-    
+
     if (normalizedSubCategoryId) {
       data.subCategory = { connect: { id: normalizedSubCategoryId } };
     }
@@ -129,11 +129,11 @@ export class ProductsService {
       } as any,
       orderBy: { createdAt: 'desc' },
     });
-    
-    // Charger toutes les images et vidéos en une seule fois (évite le problème N+1)
+
+    // Charger toutes les images, vidéos et promotions en une seule fois (évite le problème N+1)
     const productIds = products.map(p => p.id);
-    
-    const [allImages, allVideos] = await Promise.all([
+
+    const [allImages, allVideos, allProductPromotions] = await Promise.all([
       productIds.length > 0 ? (this.prisma as any).productImage.findMany({
         where: { productId: { in: productIds } },
         orderBy: { isMain: 'desc' },
@@ -141,32 +141,73 @@ export class ProductsService {
       productIds.length > 0 ? (this.prisma as any).productVideo.findMany({
         where: { productId: { in: productIds } },
       }) : [],
+      productIds.length > 0 ? (this.prisma as any).productPromotion.findMany({
+        where: { productId: { in: productIds } },
+        include: {
+          promotion: true,
+        },
+      }) : [],
     ]);
-    
-    // Grouper les images et vidéos par productId
+
+    // Grouper les images, vidéos et promotions par productId
     const imagesByProductId = new Map<number, any[]>();
     const videosByProductId = new Map<number, any[]>();
-    
+    const promotionsByProductId = new Map<number, any[]>();
+
     allImages.forEach((img: any) => {
       if (!imagesByProductId.has(img.productId)) {
         imagesByProductId.set(img.productId, []);
       }
       imagesByProductId.get(img.productId)!.push(img);
     });
-    
+
     allVideos.forEach((vid: any) => {
       if (!videosByProductId.has(vid.productId)) {
         videosByProductId.set(vid.productId, []);
       }
       videosByProductId.get(vid.productId)!.push(vid);
     });
-    
-    // Associer les images et vidéos aux produits
-    return products.map(product => ({
-      ...product,
-      images: imagesByProductId.get(product.id) || [],
-      videos: videosByProductId.get(product.id) || [],
-    }));
+
+    allProductPromotions.forEach((productPromo: any) => {
+      if (!promotionsByProductId.has(productPromo.productId)) {
+        promotionsByProductId.set(productPromo.productId, []);
+      }
+      promotionsByProductId.get(productPromo.productId)!.push(productPromo);
+    });
+
+    const now = new Date();
+
+    // Filtrer les promotions actives dans le code après avoir récupéré tous les produits
+    // Associer les images, vidéos et filtrer les promotions aux produits
+    const result = products.map(product => {
+      // Utiliser les promotions chargées séparément plutôt que celles de l'include
+      // Cela garantit que les promotions sont bien chargées
+      const productPromotions = promotionsByProductId.get(product.id) || [];
+
+      // Filtrer les promotions actives
+      const activePromotions = productPromotions.filter((productPromo: any) => {
+        const promo = productPromo?.promotion;
+        if (!promo || !promo.isActive) return false;
+
+        try {
+          const startDate = new Date(promo.startDate);
+          const endDate = new Date(promo.endDate);
+          return now >= startDate && now <= endDate;
+        } catch (e) {
+          console.error('Erreur dans la vérification des dates de promotion:', e);
+          return false;
+        }
+      });
+
+      return {
+        ...product,
+        images: imagesByProductId.get(product.id) || [],
+        videos: videosByProductId.get(product.id) || [],
+        promotions: activePromotions,
+      };
+    });
+
+    return result;
   }
 
   async findFeatured() {
@@ -194,25 +235,13 @@ export class ProductsService {
             },
           },
         },
-        promotions: {
-          include: {
-            promotion: true,
-          },
-          where: {
-            promotion: {
-              isActive: true,
-              startDate: { lte: new Date() },
-              endDate: { gte: new Date() },
-            },
-          },
-        },
       } as any,
     });
 
-    // Charger toutes les images, vidéos et avis en une seule fois (évite le problème N+1)
+    // Charger toutes les images, vidéos, avis et promotions en une seule fois (évite le problème N+1)
     const productIds = products.map(p => p.id);
-    
-    const [allImages, allVideos, allReviews] = await Promise.all([
+
+    const [allImages, allVideos, allReviews, allProductPromotions] = await Promise.all([
       productIds.length > 0 ? (this.prisma as any).productImage.findMany({
         where: { productId: { in: productIds } },
         orderBy: { isMain: 'desc' },
@@ -230,46 +259,87 @@ export class ProductsService {
           rating: true,
         },
       }) : [],
+      productIds.length > 0 ? (this.prisma as any).productPromotion.findMany({
+        where: { productId: { in: productIds } },
+        include: {
+          promotion: true,
+        },
+      }) : [],
     ]);
-    
+
     // Grouper par productId
     const imagesByProductId = new Map<number, any[]>();
     const videosByProductId = new Map<number, any[]>();
     const ratingsByProductId = new Map<number, number[]>();
-    
+    const promotionsByProductId = new Map<number, any[]>();
+
     allImages.forEach((img: any) => {
       if (!imagesByProductId.has(img.productId)) {
         imagesByProductId.set(img.productId, []);
       }
       imagesByProductId.get(img.productId)!.push(img);
     });
-    
+
     allVideos.forEach((vid: any) => {
       if (!videosByProductId.has(vid.productId)) {
         videosByProductId.set(vid.productId, []);
       }
       videosByProductId.get(vid.productId)!.push(vid);
     });
-    
+
     allReviews.forEach((review: any) => {
       if (!ratingsByProductId.has(review.productId)) {
         ratingsByProductId.set(review.productId, []);
       }
       ratingsByProductId.get(review.productId)!.push(review.rating);
     });
-    
-    // Associer les médias et calculer les notes maximales
-    return products.map(product => {
+
+    allProductPromotions.forEach((productPromo: any) => {
+      if (!promotionsByProductId.has(productPromo.productId)) {
+        promotionsByProductId.set(productPromo.productId, []);
+      }
+      promotionsByProductId.get(productPromo.productId)!.push(productPromo);
+    });
+
+    const now = new Date();
+
+    // Filtrer les promotions actives dans le code après avoir récupéré tous les produits
+    // Associer les médias, calculer les notes maximales et filtrer les promotions
+    const result = products.map(product => {
       const ratings = ratingsByProductId.get(product.id) || [];
       const maxRating = ratings.length > 0 ? Math.max(...ratings) : 0;
-      
+      const productPromotions = promotionsByProductId.get(product.id) || [];
+
+      // Filtrer les promotions actives
+      const activePromotions = productPromotions.filter((productPromo: any) => {
+        const promo = productPromo?.promotion;
+        if (!promo || !promo.isActive) return false;
+
+        try {
+          const startDate = new Date(promo.startDate);
+          const endDate = new Date(promo.endDate);
+          return now >= startDate && now <= endDate;
+        } catch (e) {
+          return false;
+        }
+      });
+
       return {
         ...product,
         images: imagesByProductId.get(product.id) || [],
         videos: videosByProductId.get(product.id) || [],
         maxRating,
+        promotions: activePromotions,
       };
     });
+
+    // Debug: vérifier combien de produits ont des promotions
+    const productsWithPromos = result.filter(p => p.promotions && p.promotions.length > 0);
+    const totalPromotionsLoaded = allProductPromotions.length;
+    console.log(`findFeatured: ${productsWithPromos.length} out of ${result.length} products have active promotions`);
+    console.log(`findFeatured: Total ProductPromotions loaded from DB: ${totalPromotionsLoaded}`);
+
+    return result;
   }
 
   async findPublic(categoryId?: number, subCategoryId?: number, search?: string) {
@@ -314,13 +384,6 @@ export class ProductsService {
           },
         },
         promotions: {
-          where: {
-            promotion: {
-              isActive: true,
-              startDate: { lte: new Date() },
-              endDate: { gte: new Date() },
-            },
-          },
           include: {
             promotion: true,
           },
@@ -329,10 +392,10 @@ export class ProductsService {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Charger toutes les images, vidéos et avis en une seule fois (évite le problème N+1)
+    // Charger toutes les images, vidéos, avis et promotions en une seule fois (évite le problème N+1)
     const productIds = products.map(p => p.id);
-    
-    const [allImages, allVideos, allReviews] = await Promise.all([
+
+    const [allImages, allVideos, allReviews, allProductPromotions] = await Promise.all([
       productIds.length > 0 ? (this.prisma as any).productImage.findMany({
         where: { productId: { in: productIds } },
         orderBy: { isMain: 'desc' },
@@ -350,46 +413,87 @@ export class ProductsService {
           rating: true,
         },
       }) : [],
+      productIds.length > 0 ? (this.prisma as any).productPromotion.findMany({
+        where: { productId: { in: productIds } },
+        include: {
+          promotion: true,
+        },
+      }) : [],
     ]);
-    
+
     // Grouper par productId
     const imagesByProductId = new Map<number, any[]>();
     const videosByProductId = new Map<number, any[]>();
     const ratingsByProductId = new Map<number, number[]>();
-    
+    const promotionsByProductId = new Map<number, any[]>();
+
     allImages.forEach((img: any) => {
       if (!imagesByProductId.has(img.productId)) {
         imagesByProductId.set(img.productId, []);
       }
       imagesByProductId.get(img.productId)!.push(img);
     });
-    
+
     allVideos.forEach((vid: any) => {
       if (!videosByProductId.has(vid.productId)) {
         videosByProductId.set(vid.productId, []);
       }
       videosByProductId.get(vid.productId)!.push(vid);
     });
-    
+
     allReviews.forEach((review: any) => {
       if (!ratingsByProductId.has(review.productId)) {
         ratingsByProductId.set(review.productId, []);
       }
       ratingsByProductId.get(review.productId)!.push(review.rating);
     });
-    
-    // Associer les médias et calculer les notes maximales
-    return products.map(product => {
+
+    allProductPromotions.forEach((productPromo: any) => {
+      if (!promotionsByProductId.has(productPromo.productId)) {
+        promotionsByProductId.set(productPromo.productId, []);
+      }
+      promotionsByProductId.get(productPromo.productId)!.push(productPromo);
+    });
+
+    const now = new Date();
+
+    // Filtrer les promotions actives dans le code après avoir récupéré tous les produits
+    // Associer les médias, calculer les notes maximales et filtrer les promotions
+    const result = products.map(product => {
       const ratings = ratingsByProductId.get(product.id) || [];
       const maxRating = ratings.length > 0 ? Math.max(...ratings) : 0;
-      
+      const productPromotions = promotionsByProductId.get(product.id) || [];
+
+      // Filtrer les promotions actives
+      const activePromotions = productPromotions.filter((productPromo: any) => {
+        const promo = productPromo?.promotion;
+        if (!promo || !promo.isActive) return false;
+
+        try {
+          const startDate = new Date(promo.startDate);
+          const endDate = new Date(promo.endDate);
+          return now >= startDate && now <= endDate;
+        } catch (e) {
+          return false;
+        }
+      });
+
       return {
         ...product,
         images: imagesByProductId.get(product.id) || [],
         videos: videosByProductId.get(product.id) || [],
         maxRating,
+        promotions: activePromotions,
       };
     });
+
+    // Debug: vérifier combien de produits ont des promotions
+    const productsWithPromos = result.filter(p => p.promotions && p.promotions.length > 0);
+    const totalPromotionsLoaded = allProductPromotions.length;
+    console.log(`findPublic: ${productsWithPromos.length} out of ${result.length} products have active promotions`);
+    console.log(`findPublic: Total ProductPromotions loaded from DB: ${totalPromotionsLoaded}`);
+
+    return result;
   }
 
   async findOnePublic(id: number) {
@@ -414,18 +518,6 @@ export class ProductsService {
             },
           },
         },
-        promotions: {
-          where: {
-            promotion: {
-              isActive: true,
-              startDate: { lte: new Date() },
-              endDate: { gte: new Date() },
-            },
-          },
-          include: {
-            promotion: true,
-          },
-        },
       } as any,
     });
 
@@ -433,15 +525,22 @@ export class ProductsService {
       throw new NotFoundException(`Produit avec l'ID ${id} introuvable`);
     }
 
-    // Charger les images et vidéos séparément
-    const images = await (this.prisma as any).productImage.findMany({
-      where: { productId: id },
-      orderBy: { isMain: 'desc' },
-    });
-
-    const videos = await (this.prisma as any).productVideo.findMany({
-      where: { productId: id },
-    });
+    // Charger les images, vidéos et promotions séparément
+    const [images, videos, productPromotions] = await Promise.all([
+      (this.prisma as any).productImage.findMany({
+        where: { productId: id },
+        orderBy: { isMain: 'desc' },
+      }),
+      (this.prisma as any).productVideo.findMany({
+        where: { productId: id },
+      }),
+      (this.prisma as any).productPromotion.findMany({
+        where: { productId: id },
+        include: {
+          promotion: true,
+        },
+      }),
+    ]);
 
     // Récupérer les avis approuvés avec les informations utilisateur
     const reviews = await (this.prisma as any).review.findMany({
@@ -472,7 +571,23 @@ export class ProductsService {
       maxRating = Math.max(...reviews.map((r: any) => r.rating));
     }
 
-    return { ...product, images, videos, averageRating, maxRating, reviews, reviewsCount: reviews.length };
+    const now = new Date();
+
+    // Filtrer les promotions actives dans le code après avoir récupéré le produit
+    const filteredPromotions = productPromotions.filter((productPromo: any) => {
+      const promo = productPromo?.promotion;
+      if (!promo || !promo.isActive) return false;
+
+      try {
+        const startDate = new Date(promo.startDate);
+        const endDate = new Date(promo.endDate);
+        return now >= startDate && now <= endDate;
+      } catch (e) {
+        return false;
+      }
+    });
+
+    return { ...product, images, videos, averageRating, maxRating, reviews, reviewsCount: reviews.length, promotions: filteredPromotions };
   }
 
   async findOne(id: number) {
@@ -535,7 +650,7 @@ export class ProductsService {
     // Déterminer les valeurs finales (en tenant compte des valeurs existantes si non modifiées)
     const finalCategoryId = normalizedCategoryId !== undefined ? normalizedCategoryId : (existing as any).categoryId;
     const finalSubCategoryId = normalizedSubCategoryId !== undefined ? normalizedSubCategoryId : (existing as any).subCategoryId;
-    
+
     // Validation : le produit doit avoir au moins une catégorie
     if (!finalCategoryId) {
       throw new Error('Le produit doit avoir une catégorie');
@@ -644,7 +759,7 @@ export class ProductsService {
     if (stock !== undefined && stock !== oldStock && this.inventoryService) {
       const newStock = stock;
       const difference = Math.abs(newStock - oldStock);
-      
+
       let movementType: StockMovementType;
       if (newStock > oldStock) {
         movementType = StockMovementType.ADD;
