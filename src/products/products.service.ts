@@ -336,9 +336,7 @@ export class ProductsService {
     // Debug: vérifier combien de produits ont des promotions
     const productsWithPromos = result.filter(p => p.promotions && p.promotions.length > 0);
     const totalPromotionsLoaded = allProductPromotions.length;
-    console.log(`findFeatured: ${productsWithPromos.length} out of ${result.length} products have active promotions`);
-    console.log(`findFeatured: Total ProductPromotions loaded from DB: ${totalPromotionsLoaded}`);
-
+    
     return result;
   }
 
@@ -490,9 +488,7 @@ export class ProductsService {
     // Debug: vérifier combien de produits ont des promotions
     const productsWithPromos = result.filter(p => p.promotions && p.promotions.length > 0);
     const totalPromotionsLoaded = allProductPromotions.length;
-    console.log(`findPublic: ${productsWithPromos.length} out of ${result.length} products have active promotions`);
-    console.log(`findPublic: Total ProductPromotions loaded from DB: ${totalPromotionsLoaded}`);
-
+    
     return result;
   }
 

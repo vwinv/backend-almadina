@@ -84,13 +84,23 @@ enum StockMovementType {
   RETURN // Retour de produit (ajout automatique lors d'un retour)
 }
 
+enum CustomerType {
+  INDIVIDUAL // Client individuel
+  COMPANY // Entreprise/Société
+}
+
 model User {
   id                Int               @id @default(autoincrement())
   email             String?           @unique
   phone             String?
   password          String
-  firstName         String
-  lastName          String
+  firstName         String? // Optionnel pour les entreprises
+  lastName          String? // Optionnel pour les entreprises
+  customerType      CustomerType?     @default(INDIVIDUAL) // Type de client (individuel ou entreprise)
+  companyName       String? // Nom de l'entreprise (si customerType = COMPANY)
+  companyType       String? // Type d'entreprise (SARL, SA, etc.)
+  taxId             String? // Numéro d'identification fiscale
+  companyAddress    String? // Adresse de l'entreprise
   profilePicture    String? // URL de la photo de profil
   role              UserRole          @default(CUSTOMER)
   orders            Order[] // Commandes passées par ce client

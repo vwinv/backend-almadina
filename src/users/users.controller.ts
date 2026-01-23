@@ -49,7 +49,17 @@ export class UsersController {
   @Post('customers')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.MANAGER)
-  create(@Body() createCustomerDto: { firstName: string; lastName: string; phone: string; email: string }) {
+  create(@Body() createCustomerDto: { 
+    firstName?: string; 
+    lastName?: string; 
+    phone: string; 
+    email: string;
+    customerType?: 'INDIVIDUAL' | 'COMPANY';
+    companyName?: string;
+    companyType?: string;
+    taxId?: string;
+    companyAddress?: string;
+  }) {
     return this.usersService.createCustomer(createCustomerDto);
   }
 
@@ -58,9 +68,26 @@ export class UsersController {
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.MANAGER)
   updateCustomer(
     @Param('id', ParseIntPipe) id: number,
-    @Body() updateCustomerDto: { firstName?: string; lastName?: string; phone?: string; email?: string },
+    @Body() updateCustomerDto: { 
+      firstName?: string; 
+      lastName?: string; 
+      phone?: string; 
+      email?: string;
+      customerType?: 'INDIVIDUAL' | 'COMPANY';
+      companyName?: string;
+      companyType?: string;
+      taxId?: string;
+      companyAddress?: string;
+    },
   ) {
     return this.usersService.updateCustomer(id, updateCustomerDto);
+  }
+
+  @Delete('customers/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.MANAGER)
+  deleteCustomer(@Param('id', ParseIntPipe) id: number) {
+    return this.usersService.deleteCustomer(id);
   }
 
   /**

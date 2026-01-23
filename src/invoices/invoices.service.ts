@@ -21,6 +21,38 @@ export class InvoicesService {
   }
 
   /**
+   * Supprime l'ancienne facture (Cloudinary et base de données) pour forcer la régénération
+   */
+  async clearInvoiceCache(orderId: number): Promise<void> {
+    try {
+      const invoice = await (this.prisma as any).invoice.findUnique({
+        where: { orderId: orderId },
+        select: { pdfUrl: true },
+      });
+
+      if (invoice && invoice.pdfUrl) {
+        // Supprimer le fichier de Cloudinary
+        try {
+          await this.cloudinaryService.deleteFile(invoice.pdfUrl);
+          this.logger.log(`Ancienne facture supprimée de Cloudinary pour la commande ${orderId}`);
+        } catch (cloudinaryError) {
+          this.logger.warn(`Impossible de supprimer la facture de Cloudinary: ${cloudinaryError.message}`);
+        }
+
+        // Supprimer le pdfUrl de la base de données
+        await (this.prisma as any).invoice.update({
+          where: { orderId: orderId },
+          data: { pdfUrl: null },
+        });
+        this.logger.log(`Cache de facture effacé pour la commande ${orderId}`);
+      }
+    } catch (error) {
+      // Ignorer l'erreur si le champ n'existe pas ou si la facture n'existe pas
+      this.logger.warn(`Impossible de supprimer le cache de la facture ${orderId}: ${error.message}`);
+    }
+  }
+
+  /**
    * Récupère les détails d'une facture par ID de commande
    */
   async getInvoiceByOrderId(orderId: number) {
@@ -34,6 +66,8 @@ export class InvoicesService {
             firstName: true,
             lastName: true,
             phone: true,
+            customerType: true,
+            companyName: true,
           },
         },
         items: {
@@ -85,8 +119,15 @@ export class InvoicesService {
 
   /**
    * Génère le PDF de la facture
+   * @param orderId - ID de la commande
+   * @param forceRegenerate - Si true, supprime l'ancienne facture avant de générer la nouvelle
    */
-  async generateInvoicePDF(orderId: number): Promise<string> {
+  async generateInvoicePDF(orderId: number, forceRegenerate: boolean = false): Promise<string> {
+    // Si forceRegenerate est true, supprimer l'ancienne facture
+    if (forceRegenerate) {
+      await this.clearInvoiceCache(orderId);
+    }
+
     const invoiceData = await this.getInvoiceByOrderId(orderId);
 
     if (!invoiceData) {
@@ -114,85 +155,191 @@ export class InvoicesService {
     const stream = fs.createWriteStream(filePath);
     doc.pipe(stream);
 
-    // En-tête
-    doc.fontSize(20).text('FACTURE', { align: 'center' });
-    doc.moveDown();
+    // En-tête avec logo et informations fiscales
+    const logoPath = path.join(process.cwd(), 'public', 'images', 'logoSbg.png');
+    const logoExists = fs.existsSync(logoPath);
+    const startY = 60;
+    
+    // Logo à gauche (si disponible)
+    if (logoExists) {
+      try {
+        doc.image(logoPath, 50, startY, { width: 100, height: 100, fit: [100, 100] });
+      } catch (error) {
+        this.logger.warn(`Impossible de charger le logo: ${error.message}`);
+      }
+    }
+    
+    // Rectangle avec informations fiscales à gauche (après le logo, espace réduit)
+    const rectX = 50;
+    const rectY = startY + 60; // En dessous du logo (espace minimal)
+    const rectWidth = 200;
+    const rectHeight = 85;
+    const borderRadius = 5;
+    
+    // Dessiner le rectangle avec bordure noire et coins arrondis
+    // Utiliser roundedRect si disponible, sinon rect
+    try {
+      if (typeof (doc as any).roundedRect === 'function') {
+        (doc as any).roundedRect(rectX, rectY, rectWidth, rectHeight, borderRadius)
+          .strokeColor('#000000')
+          .lineWidth(1.5)
+          .stroke();
+      } else {
+        // Fallback: rectangle simple
+        doc.rect(rectX, rectY, rectWidth, rectHeight)
+          .strokeColor('#000000')
+          .lineWidth(1.5)
+          .stroke();
+      }
+    } catch (error) {
+      // Si roundedRect n'est pas disponible, utiliser rect
+      doc.rect(rectX, rectY, rectWidth, rectHeight)
+        .strokeColor('#000000')
+        .lineWidth(1.5)
+        .stroke();
+    }
+    
+    // Informations fiscales dans le rectangle (à gauche)
+    doc.fontSize(9)
+       .fillColor('#000000')
+       .text('N°CC: 2305673 T', rectX + 10, rectY + 10, { width: rectWidth - 20 })
+       .text('Régime d\'Imposition : TEE', rectX + 10, rectY + 30, { width: rectWidth - 20 })
+       .text('Centre des impôts : RIVIERA 2', rectX + 10, rectY + 50, { width: rectWidth - 20 });
+    
+    // Informations facture proforma en dessous du rectangle
+    const currentY = rectY + rectHeight + 15; // En dessous du rectangle
+    doc.y = currentY;
+    const invoiceDate = new Date(invoiceTyped.createdAt);
+    const invoiceYear = invoiceDate.getFullYear();
+    const invoiceDateStr = invoiceDate.toLocaleDateString('fr-FR', { 
+      day: '2-digit', 
+      month: 'long', 
+      year: 'numeric' 
+    });
+    
+    // À gauche : "FACTURE PROFORMA /$annee/$numero facture" en gras
+    doc.fontSize(11)
+       .fillColor('#000000')
+       .font('Helvetica-Bold')
+       .text(`FACTURE PROFORMA /${invoiceYear}/${invoiceTyped.invoiceNumber}`, 50, currentY);
 
-    // Informations de la facture
-    doc.fontSize(12);
-    doc.text(`Numéro de facture: ${invoiceTyped.invoiceNumber}`, { align: 'left' });
-    doc.text(`Date: ${new Date(invoiceTyped.createdAt).toLocaleDateString('fr-FR')}`, { align: 'left' });
-    doc.text(`Commande #${order.id}`, { align: 'left' });
+    // À droite : "Abidjan, le $date"
+    doc.fontSize(11)
+       .fillColor('#000000')
+       .font('Helvetica')
+       .text(`Abidjan, le ${invoiceDateStr}`, 50, currentY, {
+         align: 'right',
+         width: doc.page.width - 100
+       });
+ 
     doc.moveDown();
 
     // Informations du client
-    doc.fontSize(14).text('CLIENT', { underline: true });
-    doc.fontSize(12);
-    doc.text(`${customerTyped.firstName} ${customerTyped.lastName}`);
-    if (customerTyped.email) {
-      doc.text(`Email: ${customerTyped.email}`);
+    doc.fontSize(12)
+       .font('Helvetica');
+    
+    // Afficher le nom selon le type de client
+    let clientName = '';
+    
+    // Log détaillé pour debug
+    this.logger.log(`=== DEBUG CLIENT INFO ===`);
+    this.logger.log(`Raw customerTyped: ${JSON.stringify(customerTyped, null, 2)}`);
+    this.logger.log(`customerType (raw): ${customerTyped.customerType}`);
+    this.logger.log(`customerType (type): ${typeof customerTyped.customerType}`);
+    this.logger.log(`companyName: ${customerTyped.companyName}`);
+    this.logger.log(`firstName: ${customerTyped.firstName}`);
+    this.logger.log(`lastName: ${customerTyped.lastName}`);
+    
+    // Normaliser le customerType
+    let customerType = '';
+    if (customerTyped.customerType) {
+      if (typeof customerTyped.customerType === 'string') {
+        customerType = customerTyped.customerType.toUpperCase().trim();
+      } else if (customerTyped.customerType.toString) {
+        customerType = customerTyped.customerType.toString().toUpperCase().trim();
+      }
     }
-    if (customerTyped.phone) {
-      doc.text(`Téléphone: ${customerTyped.phone}`);
+    
+    this.logger.log(`customerType (normalized): ${customerType}`);
+    
+    // Vérifier si c'est une compagnie
+    const isCompany = customerType === 'COMPANY';
+    const hasCompanyName = customerTyped.companyName && customerTyped.companyName.trim().length > 0;
+    
+    this.logger.log(`isCompany: ${isCompany}, hasCompanyName: ${hasCompanyName}`);
+    
+    if (isCompany && hasCompanyName) {
+      // Pour les entreprises, utiliser le nom de l'entreprise
+      clientName = customerTyped.companyName.trim();
+      this.logger.log(`Using company name: ${clientName}`);
+    } else {
+      // Pour les particuliers, utiliser prénom et nom
+      clientName = `${customerTyped.firstName || ''} ${customerTyped.lastName || ''}`.trim();
+      if (!clientName) {
+        clientName = customerTyped.email || 'Client';
+      }
+      this.logger.log(`Using individual name: ${clientName}`);
     }
+    
+    this.logger.log(`Final clientName: ${clientName}`);
+    this.logger.log(`=== END DEBUG ===`);
+    
+    doc.text(`CLIENT : ${clientName}`);
+    
     doc.moveDown();
-
-    // Adresse de livraison
-    if (shippingAddressTyped) {
-      doc.fontSize(14).text('ADRESSE DE LIVRAISON', { underline: true });
-      doc.fontSize(12);
-      doc.text(`${shippingAddressTyped.firstName} ${shippingAddressTyped.lastName}`);
-      doc.text(shippingAddressTyped.address);
-      doc.text(`${shippingAddressTyped.city}, ${shippingAddressTyped.postalCode}`);
-      doc.text(shippingAddressTyped.country);
-      if (shippingAddressTyped.phone) {
-        doc.text(`Téléphone: ${shippingAddressTyped.phone}`);
-      }
-      if (shippingAddressTyped.deliveryZone) {
-        doc.text(`Zone de livraison: ${shippingAddressTyped.deliveryZone.name}`);
-        if (shippingAddressTyped.deliveryZone.price) {
-          doc.text(`Frais de livraison: ${Number(shippingAddressTyped.deliveryZone.price).toFixed(0)} CFA`);
-        }
-      }
-      doc.moveDown();
-    }
-
-    // Informations de livraison (Livreur)
-    if (deliveryPersonTyped) {
-      doc.fontSize(14).text('LIVRAISON', { underline: true });
-      doc.fontSize(12);
-      doc.text(`${deliveryPersonTyped.firstName} ${deliveryPersonTyped.lastName}`);
-      doc.text(`Téléphone: ${deliveryPersonTyped.phone}`);
-      if (deliveryPersonTyped.email) {
-        doc.text(`Email: ${deliveryPersonTyped.email}`);
-      }
-      if (deliveryPersonTyped.vehicleType) {
-        doc.text(`Véhicule: ${deliveryPersonTyped.vehicleType}`);
-        if (deliveryPersonTyped.licensePlate) {
-          doc.text(`Plaque d'immatriculation: ${deliveryPersonTyped.licensePlate}`);
-        }
-      }
-      doc.moveDown();
-    }
-
-    // Tableau des produits
-    doc.fontSize(14).text('DÉTAIL DES PRODUITS', { underline: true });
-    doc.moveDown(0.5);
 
     // En-têtes du tableau
     const tableTop = doc.y;
-    doc.fontSize(10);
-    doc.text('Produit', 50, tableTop);
-    doc.text('Quantité', 300, tableTop);
-    doc.text('Prix unitaire', 380, tableTop, { align: 'right' });
-    doc.text('Total', 480, tableTop, { align: 'right' });
+    const tableStartX = 50;
+    const tableEndX = 550;
+    const col1X = 50;   // N°
+    const col2X = 100;  // Designation
+    const col3X = 280;  // Quantité
+    const col4X = 360;  // Prix unitaire
+    const col5X = 470;  // Prix total
+    
+    // Position de départ du tableau (pour les bordures)
+    const tableStartY = tableTop - 5;
+    
+    doc.fontSize(10).font('Helvetica-Bold');
+    doc.text('N°', col1X, tableTop, { align: 'left', width: 45 });
+    doc.text('Designation', col2X, tableTop, { align: 'left', width: 175 });
+    doc.text('Quantité', col3X, tableTop, { align: 'left', width: 75 });
+    doc.text('Prix unitaire', col4X, tableTop, { align: 'right', width: 105 });
+    doc.text('Prix total', col5X, tableTop, { align: 'right', width: 80 });
 
-    // Ligne de séparation
-    doc.moveTo(50, doc.y + 5).lineTo(550, doc.y + 5).stroke();
+    // Ligne horizontale sous les en-têtes (avec bordure du tableau)
+    const headerBottomY = doc.y + 5;
+    doc.lineWidth(0.5)
+       .moveTo(tableStartX, tableStartY)
+       .lineTo(tableEndX, tableStartY)
+       .stroke()
+       .moveTo(tableStartX, headerBottomY)
+       .lineTo(tableEndX, headerBottomY)
+       .stroke();
+    
+    // Lignes verticales entre les colonnes (en-têtes) - bordure gauche
+    doc.lineWidth(0.5)
+       .moveTo(tableStartX, tableStartY)
+       .lineTo(tableStartX, headerBottomY)
+       .stroke();
+    
+    // Lignes verticales entre les colonnes
+    doc.moveTo(col2X, tableStartY).lineTo(col2X, headerBottomY).stroke();
+    doc.moveTo(col3X, tableStartY).lineTo(col3X, headerBottomY).stroke();
+    doc.moveTo(col4X, tableStartY).lineTo(col4X, headerBottomY).stroke();
+    doc.moveTo(col5X, tableStartY).lineTo(col5X, headerBottomY).stroke();
+    
+    // Bordure droite
+    doc.moveTo(tableEndX, tableStartY).lineTo(tableEndX, headerBottomY).stroke();
+    
     doc.moveDown();
 
     // Produits
     let yPosition = doc.y;
+    let lineNumber = 1;
+    const rowHeight = 15; // Hauteur réduite pour enlever les espaces
+    
     itemsTyped.forEach((item: any) => {
       const productName = item.product?.name || 'Produit';
       const quantity = item.quantity;
@@ -205,75 +352,139 @@ export class InvoicesService {
         yPosition = 50;
       }
 
-      doc.text(productName, 50, yPosition, { width: 240 });
-      doc.text(quantity.toString(), 300, yPosition);
-      doc.text(`${unitPrice.toFixed(0)} FCFA`, 380, yPosition, { align: 'right', width: 90 });
-      doc.text(`${total.toFixed(0)} FCFA`, 480, yPosition, { align: 'right', width: 70 });
+      doc.fontSize(10).font('Helvetica'); // Police normale pour les données
+      doc.text(lineNumber.toString(), col1X, yPosition, { align: 'left', width: 45 });
+      doc.text(productName, col2X, yPosition, { align: 'left', width: 175 });
+      doc.text(quantity.toString(), col3X, yPosition, { align: 'left', width: 75 });
+      doc.text(`${unitPrice.toFixed(0)} FCFA`, col4X, yPosition, { align: 'right', width: 105 });
+      doc.text(`${total.toFixed(0)} FCFA`, col5X, yPosition, { align: 'right', width: 80 });
 
-      yPosition += 20;
+      // Lignes verticales pour cette ligne (épaisseur réduite)
+      doc.lineWidth(0.5)
+         .moveTo(col2X, yPosition - 1)
+         .lineTo(col2X, yPosition + rowHeight - 1)
+         .stroke()
+         .moveTo(col3X, yPosition - 1)
+         .lineTo(col3X, yPosition + rowHeight - 1)
+         .stroke()
+         .moveTo(col4X, yPosition - 1)
+         .lineTo(col4X, yPosition + rowHeight - 1)
+         .stroke()
+         .moveTo(col5X, yPosition - 1)
+         .lineTo(col5X, yPosition + rowHeight - 1)
+         .stroke();
+      
+      // Ligne horizontale sous chaque ligne (épaisseur réduite, sans espace)
+      doc.moveTo(tableStartX, yPosition + rowHeight - 1)
+         .lineTo(tableEndX, yPosition + rowHeight - 1)
+         .stroke();
+      
+      // Bordures gauche et droite pour chaque ligne
+      doc.moveTo(tableStartX, yPosition - 1)
+         .lineTo(tableStartX, yPosition + rowHeight - 1)
+         .stroke()
+         .moveTo(tableEndX, yPosition - 1)
+         .lineTo(tableEndX, yPosition + rowHeight - 1)
+         .stroke();
+
+      yPosition += rowHeight; // Pas d'espace supplémentaire
+      lineNumber++;
     });
 
-    // Ajouter la ligne Livraison dans le tableau (toujours affichée)
-    // Vérifier si on doit ajouter une nouvelle page
-    if (yPosition > 700) {
-      doc.addPage();
-      yPosition = 50;
-    }
+    // Ligne de séparation avant TOTAL (épaisseur réduite, sans espace)
+    doc.lineWidth(0.5)
+       .moveTo(tableStartX, yPosition)
+       .lineTo(tableEndX, yPosition)
+       .stroke();
+    yPosition += 5; // Espace réduit avant TOTAL
 
+    // Dernière ligne du tableau : TOTAL
+    const orderTotal = Number(invoiceTyped.total);
+    const totalRowY = yPosition;
     doc.fontSize(10).font('Helvetica-Bold');
-    doc.text('Livraison', 50, yPosition, { width: 240 });
-    doc.text('-', 300, yPosition);
-    doc.text('-', 380, yPosition, { align: 'right', width: 90 });
-    doc.text(`${shipping.toFixed(0)} FCFA`, 480, yPosition, { align: 'right', width: 70 });
-    doc.fontSize(10).font('Helvetica'); // Remettre la police normale
-    yPosition += 20;
-
+    doc.text('TOTAL', col2X, totalRowY, { align: 'left', width: 175 });
+    doc.text('', col3X, totalRowY, { align: 'left', width: 75 }); // Quantité vide
+    doc.text('', col4X, totalRowY, { align: 'right', width: 105 }); // Prix unitaire vide
+    doc.text(`${orderTotal.toFixed(0)} FCFA`, col5X, totalRowY, { align: 'right', width: 80 });
+    
+    // Lignes verticales pour la ligne TOTAL (épaisseur réduite)
+    doc.lineWidth(0.5)
+       .moveTo(col2X, totalRowY - 1)
+       .lineTo(col2X, totalRowY + rowHeight - 1)
+       .stroke()
+       .moveTo(col3X, totalRowY - 1)
+       .lineTo(col3X, totalRowY + rowHeight - 1)
+       .stroke()
+       .moveTo(col4X, totalRowY - 1)
+       .lineTo(col4X, totalRowY + rowHeight - 1)
+       .stroke()
+       .moveTo(col5X, totalRowY - 1)
+       .lineTo(col5X, totalRowY + rowHeight - 1)
+       .stroke();
+    
+    // Ligne de séparation après TOTAL (épaisseur réduite, sans espace)
+    yPosition += rowHeight+10;
+    const tableBottomY = yPosition;
+    doc.lineWidth(0.5)
+       .moveTo(tableStartX, tableBottomY)
+       .lineTo(tableEndX, tableBottomY)
+       .stroke();
+    
+    // Bordures gauche et droite complètes du tableau
+    doc.lineWidth(0.5)
+       .moveTo(tableStartX, tableStartY)
+       .lineTo(tableStartX, tableBottomY)
+       .stroke()
+       .moveTo(tableEndX, tableStartY)
+       .lineTo(tableEndX, tableBottomY)
+       .stroke();
+    
+    // Réinitialiser l'épaisseur pour le reste du document
+    doc.lineWidth(1);
+    
     doc.y = yPosition;
-    doc.moveDown();
+    doc.moveDown(2); // Deux sauts de ligne avant la phrase
 
-    // Ligne de séparation
-    doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
-    doc.moveDown();
-
-    // Totaux
-    const subtotal = Number(invoiceTyped.subtotal);
+    // Arrêtée la présente facture à la somme de (sur toute la ligne de gauche à droite)
     const total = Number(invoiceTyped.total);
-
-    doc.fontSize(12);
-    doc.text('Sous-total produits:', 350, doc.y, { align: 'right', width: 100 });
-    doc.text(`${subtotal.toFixed(0)} FCFA`, 450, doc.y, { align: 'right', width: 100 });
+    const totalInWords = this.numberToWords(total);
+    
+    // Écrire le préfixe en normal
+    doc.fontSize(11)
+       .font('Helvetica')
+       .text('Arrêtée la présente facture à la somme de : ', 50, doc.y, { 
+         width: doc.page.width - 100,
+         continued: true
+       });
+    
+    // Continuer avec le montant en gras sur la même ligne
+    doc.font('Helvetica-Bold')
+       .text(totalInWords.toUpperCase(), { 
+         width: doc.page.width - 100
+       });
     doc.moveDown();
 
-    doc.text('Livraison:', 350, doc.y, { align: 'right', width: 100 });
-    doc.text(`${shipping.toFixed(0)} FCFA`, 450, doc.y, { align: 'right', width: 100 });
-    doc.moveDown();
-
-    doc.fontSize(14).font('Helvetica-Bold');
-    doc.text('TOTAL:', 350, doc.y, { align: 'right', width: 100 });
-    doc.text(`${total.toFixed(0)} FCFA`, 450, doc.y, { align: 'right', width: 100 });
-    doc.moveDown(2);
-
-    // Informations de paiement
-    if (payment) {
-      doc.fontSize(12).font('Helvetica');
-      doc.text('INFORMATIONS DE PAIEMENT', { underline: true });
-      doc.moveDown(0.5);
-      doc.fontSize(10);
-      doc.text(`Statut: ${this.getPaymentStatusLabel(payment.status)}`);
-      doc.text(`Méthode: ${this.getPaymentMethodLabel(payment.method)}`);
-      if (payment.paidAt) {
-        doc.text(`Date de paiement: ${new Date(payment.paidAt).toLocaleDateString('fr-FR')}`);
-      }
-    }
-
-    // Pied de page
+    // Pied de page - positionné en bas de la page
     const pageHeight = doc.page.height;
-    doc.fontSize(8).text(
-      'Merci pour votre achat !',
-      doc.page.margins.left,
-      pageHeight - 50,
-      { align: 'center', width: doc.page.width - doc.page.margins.left - doc.page.margins.right },
-    );
+    const footerText = 'Siège social : Abidjan − Cocody riviera palmeraie − 07 BP 54 Abidjan 07 − Tél.: 07 67 62 66 98 . Rcm: cI−ABJ−2023−B13−13583 − N˚ compte Bancaire: BGFI Bank N˚ ci 1001 002010308501 87';
+    
+    // Calculer la position Y pour le pied de page (en bas de la page avec une marge)
+    const footerY = pageHeight - doc.page.margins.bottom - 20;
+    
+    // Vérifier si on doit ajouter une nouvelle page si le contenu est trop bas
+    if (doc.y > footerY - 30) {
+      doc.addPage();
+    }
+    
+    doc.fontSize(8)
+       .font('Helvetica')
+       .fillColor('#000000')
+       .text(
+         footerText,
+         doc.page.margins.left,
+         footerY,
+         { align: 'left', width: doc.page.width - doc.page.margins.left - doc.page.margins.right },
+       );
 
     // Finaliser le PDF
     doc.end();
@@ -368,6 +579,92 @@ export class InvoicesService {
       ORANGE_MONEY_SN: 'Orange Money Sénégal',
     };
     return labels[method] || method;
+  }
+
+  /**
+   * Convertit un nombre en lettres en français
+   */
+  private numberToWords(num: number): string {
+    const ones = ['', 'un', 'deux', 'trois', 'quatre', 'cinq', 'six', 'sept', 'huit', 'neuf', 'dix',
+      'onze', 'douze', 'treize', 'quatorze', 'quinze', 'seize', 'dix-sept', 'dix-huit', 'dix-neuf'];
+    const tens = ['', '', 'vingt', 'trente', 'quarante', 'cinquante', 'soixante', 'soixante', 'quatre-vingt', 'quatre-vingt'];
+
+    if (num === 0) return 'zéro';
+
+    const convertHundreds = (n: number): string => {
+      if (n === 0) return '';
+      if (n < 20) return ones[n];
+      if (n < 100) {
+        const ten = Math.floor(n / 10);
+        const one = n % 10;
+        if (ten === 7 || ten === 9) {
+          const base = ten === 7 ? 60 : 80;
+          const remainder = n - base;
+          if (remainder === 0) return tens[ten];
+          if (remainder < 20) return `${tens[ten]}-${ones[remainder]}`;
+          return `${tens[ten]}-${convertHundreds(remainder)}`;
+        }
+        if (one === 0) return tens[ten];
+        if (one === 1 && ten !== 8) return `${tens[ten]}-et-un`;
+        return `${tens[ten]}-${ones[one]}`;
+      }
+      const hundred = Math.floor(n / 100);
+      const remainder = n % 100;
+      let result = hundred === 1 ? 'cent' : `${ones[hundred]}-cent`;
+      if (remainder > 0) {
+        result += `-${convertHundreds(remainder)}`;
+      } else if (hundred > 1) {
+        result += 's';
+      }
+      return result;
+    };
+
+    const convert = (n: number): string => {
+      if (n === 0) return '';
+      if (n < 1000) return convertHundreds(n);
+      
+      const millions = Math.floor(n / 1000000);
+      const remainder = n % 1000000;
+      let result = '';
+      
+      if (millions > 0) {
+        if (millions === 1) {
+          result = 'un million';
+        } else {
+          result = `${convertHundreds(millions)} millions`;
+        }
+        if (remainder > 0) {
+          result += ` ${convert(remainder)}`;
+        }
+        return result;
+      }
+      
+      const thousands = Math.floor(n / 1000);
+      const thousandRemainder = n % 1000;
+      if (thousands > 0) {
+        if (thousands === 1) {
+          result = 'mille';
+        } else {
+          result = `${convertHundreds(thousands)} mille`;
+        }
+        if (thousandRemainder > 0) {
+          result += ` ${convertHundreds(thousandRemainder)}`;
+        }
+        return result;
+      }
+      
+      return convertHundreds(n);
+    };
+
+    const numInt = Math.floor(num);
+    const numDecimal = Math.round((num - numInt) * 100);
+    
+    let result = convert(numInt);
+    if (numDecimal > 0) {
+      result += ` virgule ${convert(numDecimal)}`;
+    }
+    
+    return `${result} francs CFA`;
   }
 }
 

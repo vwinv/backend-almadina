@@ -139,6 +139,8 @@ export class OrdersService {
             email: true,
             firstName: true,
             lastName: true,
+            customerType: true,
+            companyName: true,
           },
         },
         items: {
@@ -213,6 +215,8 @@ export class OrdersService {
             email: true,
             firstName: true,
             lastName: true,
+            customerType: true,
+            companyName: true,
           },
         },
         items: {
@@ -251,6 +255,8 @@ export class OrdersService {
             email: true,
             firstName: true,
             lastName: true,
+            customerType: true,
+            companyName: true,
           },
         },
         items: {
@@ -296,6 +302,8 @@ export class OrdersService {
             firstName: true,
             lastName: true,
             phone: true,
+            customerType: true,
+            companyName: true,
           },
         },
         items: {
@@ -333,6 +341,8 @@ export class OrdersService {
             email: true,
             firstName: true,
             lastName: true,
+            customerType: true,
+            companyName: true,
           },
         },
         items: {
@@ -431,6 +441,8 @@ export class OrdersService {
             email: true,
             firstName: true,
             lastName: true,
+            customerType: true,
+            companyName: true,
           },
         },
         items: {
@@ -536,6 +548,8 @@ export class OrdersService {
             email: true,
             firstName: true,
             lastName: true,
+            customerType: true,
+            companyName: true,
           },
         },
         items: {
@@ -622,6 +636,8 @@ export class OrdersService {
             email: true,
             firstName: true,
             lastName: true,
+            customerType: true,
+            companyName: true,
           },
         },
         items: {
@@ -680,6 +696,8 @@ export class OrdersService {
             email: true,
             firstName: true,
             lastName: true,
+            customerType: true,
+            companyName: true,
           },
         },
         items: {
@@ -904,6 +922,8 @@ export class OrdersService {
             email: true,
             firstName: true,
             lastName: true,
+            customerType: true,
+            companyName: true,
           },
         },
         items: {

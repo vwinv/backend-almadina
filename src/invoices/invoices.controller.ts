@@ -34,8 +34,7 @@ export class InvoicesController {
 
   /**
    * Génère et télécharge le PDF de la facture
-   * Si la facture existe déjà sur Cloudinary, retourne l'URL Cloudinary
-   * Sinon, génère le PDF, l'upload sur Cloudinary et redirige vers l'URL
+   * Force toujours la régénération : supprime l'ancienne facture et génère une nouvelle
    */
   @Get(':orderId/pdf')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -44,15 +43,8 @@ export class InvoicesController {
     @Param('orderId', ParseIntPipe) orderId: number,
     @Res() res: Response,
   ) {
-    // Vérifier si la facture a déjà une URL Cloudinary
-    const invoice = await this.invoicesService.getInvoiceByOrderId(orderId);
-    if (invoice && (invoice.invoice as any).pdfUrl) {
-      // Rediriger vers l'URL Cloudinary
-      return res.redirect((invoice.invoice as any).pdfUrl);
-    }
-
-    // Générer le PDF et l'uploader sur Cloudinary
-    const pdfPathOrUrl = await this.invoicesService.generateInvoicePDF(orderId);
+    // Toujours forcer la régénération : supprimer l'ancienne facture et générer une nouvelle
+    const pdfPathOrUrl = await this.invoicesService.generateInvoicePDF(orderId, true);
     
     // Si c'est une URL Cloudinary (commence par http:// ou https://)
     if (pdfPathOrUrl.startsWith('http://') || pdfPathOrUrl.startsWith('https://')) {

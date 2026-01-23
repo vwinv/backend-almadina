@@ -39,6 +39,11 @@ export class UsersService {
             firstName: true,
             lastName: true,
             phone: true,
+            customerType: true,
+            companyName: true,
+            companyType: true,
+            taxId: true,
+            companyAddress: true,
             createdAt: true,
             _count: {
               select: {
@@ -54,14 +59,16 @@ export class UsersService {
           return customerNormalizedPhone.includes(normalizedSearch) ||
                  customer.email?.toLowerCase().includes(search.toLowerCase()) ||
                  customer.firstName?.toLowerCase().includes(search.toLowerCase()) ||
-                 customer.lastName?.toLowerCase().includes(search.toLowerCase());
+                 customer.lastName?.toLowerCase().includes(search.toLowerCase()) ||
+                 customer.companyName?.toLowerCase().includes(search.toLowerCase());
         });
       } else {
-        // Recherche normale (nom, email)
+        // Recherche normale (nom, email, nom entreprise)
         where.OR = [
           { email: { contains: search, mode: 'insensitive' } },
           { firstName: { contains: search, mode: 'insensitive' } },
           { lastName: { contains: search, mode: 'insensitive' } },
+          { companyName: { contains: search, mode: 'insensitive' } },
         ];
       }
     }
@@ -74,6 +81,11 @@ export class UsersService {
         firstName: true,
         lastName: true,
         phone: true,
+        customerType: true,
+        companyName: true,
+        companyType: true,
+        taxId: true,
+        companyAddress: true,
         createdAt: true,
         _count: {
           select: {
@@ -108,6 +120,11 @@ export class UsersService {
         firstName: true,
         lastName: true,
         phone: true,
+        customerType: true,
+        companyName: true,
+        companyType: true,
+        taxId: true,
+        companyAddress: true,
       },
     });
 
@@ -140,6 +157,11 @@ export class UsersService {
           firstName: true,
           lastName: true,
           phone: true,
+          customerType: true,
+          companyName: true,
+          companyType: true,
+          taxId: true,
+          companyAddress: true,
         },
       });
       return customer || null;
@@ -164,6 +186,11 @@ export class UsersService {
           firstName: true,
           lastName: true,
           phone: true,
+          customerType: true,
+          companyName: true,
+          companyType: true,
+          taxId: true,
+          companyAddress: true,
         },
       });
 
@@ -176,7 +203,17 @@ export class UsersService {
     }
   }
 
-  async createCustomer(data: { firstName: string; lastName: string; phone: string; email: string }) {
+  async createCustomer(data: { 
+    firstName?: string; 
+    lastName?: string; 
+    phone: string; 
+    email: string;
+    customerType?: 'INDIVIDUAL' | 'COMPANY';
+    companyName?: string;
+    companyType?: string;
+    taxId?: string;
+    companyAddress?: string;
+  }) {
     // Normaliser le numéro de téléphone avant de vérifier s'il existe
     const normalizedPhone = normalizePhoneNumber(data.phone);
     
@@ -194,6 +231,18 @@ export class UsersService {
       throw new ConflictException('Un client avec cet email existe déjà');
     }
 
+    // Validation selon le type de client
+    const customerType = data.customerType || 'INDIVIDUAL';
+    if (customerType === 'INDIVIDUAL') {
+      if (!data.firstName || !data.lastName) {
+        throw new ConflictException('Le prénom et le nom sont requis pour un client individuel');
+      }
+    } else if (customerType === 'COMPANY') {
+      if (!data.companyName) {
+        throw new ConflictException('Le nom de l\'entreprise est requis pour une entreprise');
+      }
+    }
+
     // Générer un mot de passe aléatoire sécurisé
     const plainPassword = generateRandomPassword(12);
     const hashedPassword = await bcrypt.hash(plainPassword, 10);
@@ -202,10 +251,15 @@ export class UsersService {
       data: {
         email: data.email,
         password: hashedPassword,
-        firstName: data.firstName,
-        lastName: data.lastName,
+        firstName: data.firstName || null,
+        lastName: data.lastName || null,
         phone: normalizedPhone, // Sauvegarder le numéro normalisé
         role: 'CUSTOMER',
+        customerType: customerType as any,
+        companyName: data.companyName || null,
+        companyType: data.companyType || null,
+        taxId: data.taxId || null,
+        companyAddress: data.companyAddress || null,
       },
       select: {
         id: true,
@@ -213,13 +267,22 @@ export class UsersService {
         firstName: true,
         lastName: true,
         phone: true,
+        customerType: true,
+        companyName: true,
+        companyType: true,
+        taxId: true,
+        companyAddress: true,
       },
     });
 
     // Envoyer l'email avec les accès
     if (this.emailService) {
+      const customerName = customerType === 'COMPANY' && data.companyName 
+        ? data.companyName 
+        : `${data.firstName || ''} ${data.lastName || ''}`.trim();
+      
       this.emailService.sendCustomerAccessEmail({
-        customerName: `${data.firstName} ${data.lastName}`,
+        customerName: customerName || 'Client',
         customerEmail: data.email,
         password: plainPassword,
         phone: normalizedPhone,
@@ -232,7 +295,17 @@ export class UsersService {
     return customer;
   }
 
-  async updateCustomer(id: number, data: { firstName?: string; lastName?: string; phone?: string; email?: string }) {
+  async updateCustomer(id: number, data: { 
+    firstName?: string; 
+    lastName?: string; 
+    phone?: string; 
+    email?: string;
+    customerType?: 'INDIVIDUAL' | 'COMPANY';
+    companyName?: string;
+    companyType?: string;
+    taxId?: string;
+    companyAddress?: string;
+  }) {
     const customer = await this.prisma.user.findUnique({
       where: { id },
     });
@@ -276,6 +349,23 @@ export class UsersService {
       if (existingCustomerByEmail) {
         throw new ConflictException('Un autre client avec cet email existe déjà');
       }
+    }
+    if (data.customerType !== undefined) {
+      updateData.customerType = data.customerType;
+    }
+    if (data.companyName !== undefined) {
+      updateData.companyName = data.companyName;
+    }
+    if (data.companyType !== undefined) {
+      updateData.companyType = data.companyType;
+    }
+    if (data.taxId !== undefined) {
+      updateData.taxId = data.taxId;
+    }
+    if (data.companyAddress !== undefined) {
+      updateData.companyAddress = data.companyAddress;
+    }
+    if (data.email !== undefined && data.email !== customer.email) {
       updateData.email = data.email;
     }
 
@@ -288,8 +378,40 @@ export class UsersService {
         firstName: true,
         lastName: true,
         phone: true,
+        customerType: true,
+        companyName: true,
+        companyType: true,
+        taxId: true,
+        companyAddress: true,
       },
     });
+  }
+
+  async deleteCustomer(id: number) {
+    const customer = await this.prisma.user.findUnique({
+      where: { id },
+    });
+
+    if (!customer || customer.role !== 'CUSTOMER') {
+      throw new NotFoundException('Client introuvable');
+    }
+
+    // Vérifier si le client a des commandes
+    const ordersCount = await this.prisma.order.count({
+      where: { userId: id },
+    });
+
+    if (ordersCount > 0) {
+      throw new ConflictException(
+        `Impossible de supprimer ce client car il a ${ordersCount} commande(s) associée(s).`,
+      );
+    }
+
+    await this.prisma.user.delete({
+      where: { id },
+    });
+
+    return { message: 'Client supprimé avec succès' };
   }
 
   /**
